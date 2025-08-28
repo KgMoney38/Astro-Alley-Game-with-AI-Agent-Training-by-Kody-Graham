@@ -13,7 +13,7 @@ FPS = 60
 SPAWN_MS = 1500
 BIRD_START_X = 100
 STRIP_PATH = "assets/strip_background.png"
-num_frames = 50
+scroll_speed= 3
 background = (0,0,0)
 text = (255,255,255)
 
@@ -26,31 +26,25 @@ class Game:
         self.font = pygame.font.SysFont(None, 50)
 
         #Load the player and the pipes
-        self.player = Player(x=BIRD_START_X, y=SCREEN_HEIGHT//2, image_name="ship.png", size = (50,50))
+        self.player = Player(x=BIRD_START_X, y=SCREEN_HEIGHT//2, image_name="ship.png", size = (80,80))
         self.pipes: List[Pipe] = [Pipe.spawn(SCREEN_WIDTH, SCREEN_HEIGHT)]
         self.score = 0
         self.game_over = False
         self._spawn_ms = 0
         self.running = True
 
-        #Make my background move with every jump
-        strip = pygame.image.load(STRIP_PATH).convert()
-
-        #Slice my strip into num_frames frames, each exactly the same size as my screen
-        self.bg_frames: List[pygame.Surface] = []
-        for i in range(num_frames):
-            rect = pygame.Rect(i*SCREEN_WIDTH,0, SCREEN_WIDTH, SCREEN_HEIGHT)
-            frame = strip.subsurface(rect).copy()
-            self.bg_frames.append(frame)
-        self.bg_index = 0
+        #Make my background move continuously
+        self.bg_image= pygame.image.load(STRIP_PATH).convert()
+        #Keep track of the scroll position
+        self.bg_x =0
 
     #Reset
     def reset(self) -> None:
-        self.player = Player(x=BIRD_START_X, y=SCREEN_HEIGHT//2, image_name="ship.png", size = (50,50))
+        self.player = Player(x=BIRD_START_X, y=SCREEN_HEIGHT//2, image_name="ship.png", size = (80,80))
         self.pipes = [Pipe.spawn(SCREEN_WIDTH, SCREEN_HEIGHT)]
         self.score = 0
         self.game_over = False
-        self.bg_index = 0
+        self.bg_x = 0
         self._spawn_ms = 0
 
     def run(self) -> None:
@@ -75,16 +69,14 @@ class Game:
                     else:
                         #Jump
                         self.player.jump()
-                        #Move background
-                        self.bg_index = (self.bg_index + 1) % num_frames
                 elif event.key == pygame.K_RETURN:
                     self.reset()
 
     def _update(self, dt_ms: int) -> None:
-        self.player.update()
 
         #Increment the timer
         self.player.update()
+        self._spawn_ms += dt_ms
 
         #New pipes spawn based on timer
         if self._spawn_ms >= SPAWN_MS:
@@ -99,8 +91,7 @@ class Game:
                 self.score += 1
 
         #Delete when off the screen
-        while self.pipes and self.pipes[0].off_screen():
-            self.pipes.pop(0)
+        self.pipes = [pipe for pipe in self.pipes if not pipe.off_screen()]
 
         #Track the collisions
         bird_rect = self.player.get_rect()
@@ -110,14 +101,23 @@ class Game:
                 self.game_over = True
                 break
 
+        #Check top/bottom collision
+        if bird_rect.bottom > SCREEN_HEIGHT or bird_rect.top < 0:
+            self.game_over = True
+
+        #Scroll background image
+        self.bg_x -= scroll_speed
+        if self.bg_x <= -self.bg_image.get_width():
+            self.bg_x = 0
+
     def _draw(self) -> None:
-        #Draw the frame for the background and only advance on jump
-        self.screen.fill(background)
-        self.screen.blit(self.bg_frames[self.bg_index], (0,0))
+        #Scroll background
+        self.screen.blit(self.bg_image, (self.bg_x, 0))
+        self.screen.blit(self.bg_image, (self.bg_x + self.bg_image.get_width(), 0))
 
         #Pipes and the player
-        for p in self.pipes:
-            p.draw(self.screen)
+        for pipe in self.pipes:
+            pipe.draw(self.screen)
         self.player.draw(self.screen)
 
         #score
@@ -127,6 +127,6 @@ class Game:
         if self.game_over:
             msg = "GAME OVER- ->Space<- to Restart"
             msg_surface = self.font.render(msg, True, text)
-            self.screen.blit(msg_surface, (SCREEN_WIDTH // 2 - text.get_width() // 2, SCREEN_HEIGHT // 2 - text.get_height() // 2),)
+            self.screen.blit(msg_surface, (SCREEN_WIDTH // 2 - msg_surface.get_width() // 2, SCREEN_HEIGHT // 2 - msg_surface.get_height() // 2),)
 
         pygame.display.flip()

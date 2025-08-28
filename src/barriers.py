@@ -72,3 +72,8 @@ class Pipe:
     def draw(self, surface: pygame.Surface) -> None:
         surface.blit(self.top_image, (int(self.x), 0))
         surface.blit(self.bottom_image, (int(self.x), self.top_height + self.gap))
+
+        #Debug the tops of the boxes to avoid center collision
+        top_rect, bottom_rect = self.rects()
+        pygame.draw.rect(surface, pygame.Color("red"), top_rect,2)
+        pygame.draw.rect(surface, pygame.Color("blue"), bottom_rect,2)
