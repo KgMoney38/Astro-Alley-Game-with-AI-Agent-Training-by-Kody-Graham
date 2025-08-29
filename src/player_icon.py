@@ -88,6 +88,10 @@ class Player:
         #Draw ship
         surface.blit(self.image, self.rect)
 
+        #Debug safe area around ship
+        #pygame.draw.rect(surface, pygame.Color("purple"), self.rect,2)
+
+
     def reset(self, x: Optional[int] = None, y: Optional[int] = None) -> None:
         if x is not None or y is not None:
             cx = x if x is not None else self.rect.centerx
