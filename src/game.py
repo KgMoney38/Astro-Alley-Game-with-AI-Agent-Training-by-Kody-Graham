@@ -16,6 +16,7 @@ STRIP_PATH = "assets/strip_background.png"
 scroll_speed= 4
 background = (0,0,0)
 text = (255,255,255)
+#update git
 
 class Game:
     def __init__(self) -> None:
