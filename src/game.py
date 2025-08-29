@@ -16,7 +16,6 @@ STRIP_PATH = "assets/strip_background.png"
 scroll_speed= 4
 background = (0,0,0)
 text = (255,255,255)
-#update git
 
 class Game:
     def __init__(self) -> None:
@@ -26,10 +25,12 @@ class Game:
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont(None, 50)
 
-        #Load the player and the pipes
+        #Load the player and the obstacles
         self.player = Player(x=BIRD_START_X, y=SCREEN_HEIGHT//2, image_name="ship.png", size = (100,50))
         self.pipes: List[Pipe] = [Pipe.spawn(SCREEN_WIDTH, SCREEN_HEIGHT)]
         self.score = 0
+        self.high_score = 0
+        self.rounds_played = 0
         self.game_over = False
         self._spawn_ms = 0
         self.running = True
@@ -47,6 +48,14 @@ class Game:
         self.game_over = False
         self.bg_x = 0
         self._spawn_ms = 0
+
+    #Called when round ends
+    def _on_game_over(self) -> None:
+        if not self.game_over:
+            self.game_over = True
+            self.rounds_played +=1
+            if self.score > self.high_score:
+                self.high_score = self.score
 
     def run(self) -> None:
         while self.running:
@@ -99,12 +108,12 @@ class Game:
         for pipe in self.pipes:
             top_rect, bot_rect = pipe.rects()
             if bird_rect.colliderect(top_rect) or bird_rect.colliderect(bot_rect):
-                self.game_over = True
+                self._on_game_over()
                 break
 
         #Check top/bottom collision
         if bird_rect.bottom > SCREEN_HEIGHT or bird_rect.top < 0:
-            self.game_over = True
+            self._on_game_over()
 
         #Scroll background image
         self.bg_x -= scroll_speed
@@ -116,7 +125,7 @@ class Game:
         self.screen.blit(self.bg_image, (self.bg_x, 0))
         self.screen.blit(self.bg_image, (self.bg_x + self.bg_image.get_width(), 0))
 
-        #Pipes and the player
+        #Obstacles and the player
         for pipe in self.pipes:
             pipe.draw(self.screen)
         self.player.draw(self.screen)
@@ -125,6 +134,14 @@ class Game:
         score_surface = self.font.render(str(self.score), True, text)
         self.screen.blit(score_surface, (SCREEN_WIDTH// 2 - score_surface.get_width() // 2, 20))
 
+        #High
+        if self.rounds_played > 0:
+            best_surface = self.font.render(f"Highest Score: {self.high_score}", True, text)
+            bx = (SCREEN_WIDTH // 2) - best_surface.get_width() // 2
+            by = SCREEN_HEIGHT - best_surface.get_height()-16
+            self.screen.blit(best_surface,(bx,by))
+
+        #Game over!
         if self.game_over:
             msg = "GAME OVER- ->Space<- to Restart"
             msg_surface = self.font.render(msg, True, text)
