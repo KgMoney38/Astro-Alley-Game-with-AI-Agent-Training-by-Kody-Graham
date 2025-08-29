@@ -8,7 +8,7 @@ import pygame
 
 #TEMP Variables: Will move to settings later but want a testable version quick so adding them here for now
 SCREEN_HEIGHT = 800
-PIPE_WIDTH = 80
+PIPE_WIDTH = 100
 PIPE_GAP = 160
 PIPE_SPEED = 4
 PIPE_MIN_TOP = 100
@@ -64,9 +64,9 @@ class Pipe:
         return self.x + self.width < 0
 
     def rects(self) -> Tuple[pygame.Rect, pygame.Rect]:
-        top_rect = pygame.Rect(int(self.x), 0, self.width, self.top_height)
+        top_rect = pygame.Rect(int(self.x), 0, self.width, self.top_height-10)
         bottom_y = self.top_height + self.gap
-        bottom_rect = pygame.Rect(int(self.x), bottom_y, self.width, self.bottom_height)
+        bottom_rect = pygame.Rect(int(self.x), bottom_y+15, self.width, self.bottom_height)
         return top_rect, bottom_rect
 
     def draw(self, surface: pygame.Surface) -> None:
@@ -74,6 +74,6 @@ class Pipe:
         surface.blit(self.bottom_image, (int(self.x), self.top_height + self.gap))
 
         #Debug the tops of the boxes to avoid center collision
-        top_rect, bottom_rect = self.rects()
-        pygame.draw.rect(surface, pygame.Color("red"), top_rect,2)
-        pygame.draw.rect(surface, pygame.Color("blue"), bottom_rect,2)
+        #top_rect, bottom_rect = self.rects()
+        #pygame.draw.rect(surface, pygame.Color("red"), top_rect,2)
+        #pygame.draw.rect(surface, pygame.Color("blue"), bottom_rect,2)

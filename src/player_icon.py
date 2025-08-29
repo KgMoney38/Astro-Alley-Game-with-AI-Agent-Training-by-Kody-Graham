@@ -12,7 +12,7 @@ def asset_path(*parts: str) -> str:
     return os.path.join(here, "assets", *parts)
 
 class Player:
-    def __init__(self, x: int, y: int, image_name: str = "ship.png", size: Tuple[int,int] = (50, 50), ) -> None:
+    def __init__(self, x: int, y: int, image_name: str = "ship.png", size: Tuple[int,int] = (100, 50), ) -> None:
 
         #Load the image and then scale it to a normal size
         image_full_path = asset_path(image_name)
@@ -57,7 +57,8 @@ class Player:
         self.rect = self.image.get_rect(center = self.rect.center)
 
     def get_rect(self) -> pygame.Rect:
-        return self.rect
+        #Shrink player collision box without changing image size
+       return self.rect.inflate(-self.rect.width* .5, -self.rect.height * .6)
 
     def draw(self, surface: pygame.Surface) -> None:
         surface.blit(self.image, self.rect)

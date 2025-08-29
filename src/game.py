@@ -13,7 +13,7 @@ FPS = 60
 SPAWN_MS = 1500
 BIRD_START_X = 100
 STRIP_PATH = "assets/strip_background.png"
-scroll_speed= 3
+scroll_speed= 4
 background = (0,0,0)
 text = (255,255,255)
 
@@ -26,7 +26,7 @@ class Game:
         self.font = pygame.font.SysFont(None, 50)
 
         #Load the player and the pipes
-        self.player = Player(x=BIRD_START_X, y=SCREEN_HEIGHT//2, image_name="ship.png", size = (80,80))
+        self.player = Player(x=BIRD_START_X, y=SCREEN_HEIGHT//2, image_name="ship.png", size = (100,50))
         self.pipes: List[Pipe] = [Pipe.spawn(SCREEN_WIDTH, SCREEN_HEIGHT)]
         self.score = 0
         self.game_over = False
@@ -40,7 +40,7 @@ class Game:
 
     #Reset
     def reset(self) -> None:
-        self.player = Player(x=BIRD_START_X, y=SCREEN_HEIGHT//2, image_name="ship.png", size = (80,80))
+        self.player = Player(x=BIRD_START_X, y=SCREEN_HEIGHT//2, image_name="ship.png", size = (100,50))
         self.pipes = [Pipe.spawn(SCREEN_WIDTH, SCREEN_HEIGHT)]
         self.score = 0
         self.game_over = False
@@ -120,7 +120,7 @@ class Game:
             pipe.draw(self.screen)
         self.player.draw(self.screen)
 
-        #score
+        #score and high score
         score_surface = self.font.render(str(self.score), True, text)
         self.screen.blit(score_surface, (SCREEN_WIDTH// 2 - score_surface.get_width() // 2, 20))
 
