@@ -5,6 +5,7 @@ import pygame
 from typing import List
 
 import os, json #For my lifetime highscore
+import hmac,hashlib,platform #To protect highscore integrity at least a little
 
 from player_icon import Player
 from barriers import Pipe, SCREEN_HEIGHT #Reused from barriers class
@@ -24,18 +25,41 @@ text = (255,255,255)
 DATA_DIR= os.path.join(os.path.dirname(__file__), "data")
 HIGH_SCORE_FILE = os.path.join(DATA_DIR, "highscore.json")
 
+#Protect All Time High Score!
+SECRET_KEY= "SECRET-DEMO-KEY-v1:: 9d8d7ea4b6b940aa8b4e2f0a1d5f37"
+SECRET_KEY=os.environ.get("GAME_SECRET", SECRET_KEY)
+BIND_TO_DEVICE= False #So it is available through github
+
+def _sign(score: int, salt: str) -> str:
+    device = platform.node() if BIND_TO_DEVICE else ""
+    msg = f"{score}|{salt}|{device}".encode("utf-8")
+    return hmac.new(SECRET_KEY.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+
 
 def load_high_score() -> int:
     try:
         with open(HIGH_SCORE_FILE, "r", encoding="utf-8") as f:
-            return int(json.load(f).get("highscore",0))
+            data = json.load(f)
+        score = int(data.get("score", 0))
+        salt = data.get("salt", "")
+        sig = data.get("sig", "")
+
+        #Verify
+        if sig and hmac.compare_digest(sig, _sign(score, salt)):
+            return score
+        #MISSING OR INVALID!
+        return 0
+
     except Exception:
         return 0
 
 def save_high_score(score: int) -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
+    salt = os.urandom(16).hex()
+    sig= _sign(int(score), salt)
+    payload = {"score": int(score), "salt": salt, "sig": sig}
     with open(HIGH_SCORE_FILE, "w", encoding="utf-8") as f:
-        json.dump({"highscore":int(score)}, f)
+        json.dump(payload, f)
 
 class Game:
     def __init__(self) -> None:
