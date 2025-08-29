@@ -4,10 +4,13 @@
 import pygame
 from typing import List
 
+import os, json #For my lifetime highscore
+
 from player_icon import Player
 from barriers import Pipe, SCREEN_HEIGHT #Reused from barriers class
 
 #Fast settings to get to testable tonight
+#Any ALL_CAPS var can be moved to settings .py and passed in
 SCREEN_WIDTH = 1000
 FPS = 60
 SPAWN_MS = 1500
@@ -16,6 +19,23 @@ STRIP_PATH = "assets/strip_background.png"
 scroll_speed= 4
 background = (0,0,0)
 text = (255,255,255)
+
+#For highest score which will be lifetime not just runtime
+DATA_DIR= os.path.join(os.path.dirname(__file__), "data")
+HIGH_SCORE_FILE = os.path.join(DATA_DIR, "highscore.json")
+
+
+def load_high_score() -> int:
+    try:
+        with open(HIGH_SCORE_FILE, "r", encoding="utf-8") as f:
+            return int(json.load(f).get("highscore",0))
+    except Exception:
+        return 0
+
+def save_high_score(score: int) -> None:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(HIGH_SCORE_FILE, "w", encoding="utf-8") as f:
+        json.dump({"highscore":int(score)}, f)
 
 class Game:
     def __init__(self) -> None:
@@ -26,10 +46,11 @@ class Game:
         self.font = pygame.font.SysFont(None, 50)
 
         #Load the player and the obstacles
-        self.player = Player(x=BIRD_START_X, y=SCREEN_HEIGHT//2, image_name="ship.png", size = (100,50))
+        self.player = Player(x=BIRD_START_X, y=SCREEN_HEIGHT//2, image_name="ship.png", size = (120,60))
         self.pipes: List[Pipe] = [Pipe.spawn(SCREEN_WIDTH, SCREEN_HEIGHT)]
         self.score = 0
         self.high_score = 0
+        self.all_time_high_score = load_high_score()
         self.rounds_played = 0
         self.game_over = False
         self._spawn_ms = 0
@@ -42,12 +63,13 @@ class Game:
 
     #Reset
     def reset(self) -> None:
-        self.player = Player(x=BIRD_START_X, y=SCREEN_HEIGHT//2, image_name="ship.png", size = (100,50))
+        self.player = Player(x=BIRD_START_X, y=SCREEN_HEIGHT//2, image_name="ship.png", size = (120,60))
         self.pipes = [Pipe.spawn(SCREEN_WIDTH, SCREEN_HEIGHT)]
         self.score = 0
         self.game_over = False
         self.bg_x = 0
         self._spawn_ms = 0
+        self.player.flame_ms_left = 0
 
     #Called when round ends
     def _on_game_over(self) -> None:
@@ -56,6 +78,9 @@ class Game:
             self.rounds_played +=1
             if self.score > self.high_score:
                 self.high_score = self.score
+            if self.score > self.all_time_high_score:
+                self.all_time_high_score = self.score
+                save_high_score(self.all_time_high_score)
 
     def run(self) -> None:
         while self.running:
@@ -79,13 +104,14 @@ class Game:
                     else:
                         #Jump
                         self.player.jump()
+                        self.player.ignite()
                 elif event.key == pygame.K_RETURN:
                     self.reset()
 
     def _update(self, dt_ms: int) -> None:
 
         #Increment the timer
-        self.player.update()
+        self.player.update(dt_ms)
         self._spawn_ms += dt_ms
 
         #New pipes spawn based on timer
@@ -145,6 +171,13 @@ class Game:
         if self.game_over:
             msg = "GAME OVER- ->Space<- to Restart"
             msg_surface = self.font.render(msg, True, text)
-            self.screen.blit(msg_surface, (SCREEN_WIDTH // 2 - msg_surface.get_width() // 2, SCREEN_HEIGHT // 2 - msg_surface.get_height() // 2),)
+            cx= SCREEN_WIDTH // 2
+            cy = SCREEN_HEIGHT // 2
+
+            self.screen.blit(msg_surface, (cx - msg_surface.get_width() // 2, cy - msg_surface.get_height() // 2))
+
+            #All time high
+            ath_surface= self.font.render(f"All-Time High Score: {self.all_time_high_score}", True, text)
+            self.screen.blit(ath_surface,(cx- ath_surface.get_width() // 2, cy - ath_surface.get_height() // 2 + msg_surface.get_height() +12))
 
         pygame.display.flip()
