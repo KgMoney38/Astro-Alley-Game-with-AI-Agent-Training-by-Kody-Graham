@@ -2,12 +2,20 @@
 #8/24/2025
 
 import pygame
-from typing import List
+from typing import List, Optional
 from menu import MainMenu, CustomizeMenu
 import os, json #For my lifetime highscore
 import hmac,hashlib,platform #To protect highscore integrity at least a little
 from player_icon import Player
 from barriers import Pipe, SCREEN_HEIGHT, PIPE_SPEED #Reused from barriers class
+
+#For my AI Autopilot
+import os as _os
+import sys as _sys
+ai_directory = os.path.dirname(__file__), "..", "AI Model Files"
+if  ai_directory not in _sys.path:
+    _sys.path.insert(0, ai_directory)
+from AI import Autopilot #I know ill need this for my runtime controller
 
 #Sound effects
 pygame.mixer.pre_init(44100, -16, 2, 512)
@@ -37,8 +45,8 @@ def _sign(score: int, salt: str) -> str:
     msg = f"{score}|{salt}|{device}".encode("utf-8")
     return hmac.new(SECRET_KEY.encode("utf-8"), msg, hashlib.sha256).hexdigest()
 
-Here = os.path.dirname(__file__)
-ASSETS_AUDIO_DIR = os.path.join(Here, "assets", "sounds")
+audioDir = os.path.dirname(__file__)
+ASSETS_AUDIO_DIR = os.path.join(audioDir, "assets", "sounds")
 
 def sound_path(*parts: str) -> str:
     return os.path.join(ASSETS_AUDIO_DIR, *parts)
@@ -91,6 +99,8 @@ class Game:
         self.selected_ob = os. path.join(assets, "obstacle.png")
         self.customize = CustomizeMenu(self)
 
+        self.ai_enabled = False
+        self.autopilot: Optional[Autopilot] = None
         #Score and flags
         self.score = 0
         self.high_score = 0
@@ -132,10 +142,17 @@ class Game:
         self.state = "menu"
 
     def start_user_game(self):
+        self.ai_enabled = False
+        self.autopilot = None
         self.state = "play"
+        self.reset()
 
     def start_ai_game(self):
+        self.ai_enabled = True
+        model_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "best_model.pkl")
+        self.autopilot = Autopilot(model_path if os.path.exists(model_path) else None) #Safeguard to check existence of my model path
         self.state = "play"
+        self.reset()
 
     def open_customize(self):
         self.state = "customize"# change later
@@ -227,7 +244,9 @@ class Game:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
+
             elif event.type == pygame.KEYDOWN:
+                #Will work in both of my game modes
                 if event.key == pygame.K_ESCAPE:
                     self.open_menu()
                 elif event.key == pygame.K_m:
@@ -239,14 +258,17 @@ class Game:
 
                 elif event.key == pygame.K_SPACE:
                     if self.game_over:
+                        #Allow space to restart even in my AI mode
                         self.reset()
-                    else:
-                        #Jump
+                    elif not getattr(self, "ai_enabled", False):
+                        #Only allow user jump when AI is off
                         self.player.jump()
                         self.player.ignite()
-
                         if self.snd_jump:
                             self.snd_jump.play()
+                    else:
+                        #AI mode ignore the space
+                        pass
 
                 elif event.key == pygame.K_RETURN:
                     self.reset()
@@ -257,6 +279,16 @@ class Game:
         self.player.update(dt_ms)
         self._spawn_ms += dt_ms
 
+        #Use my AI to decide to jump
+        if self.ai_enabled and not self.game_over and self.autopilot is not None:
+            try:
+                if self.autopilot.decide(self.player, self.pipes, SCREEN_HEIGHT):
+                    self.player.jump()
+                    self.player.ignite()
+            except Exception as e:
+                #Failsafe
+                print(f"[AUTOPILOT ERROR!] {e}")
+                self.ai_enabled = False
         #New pipes spawn based on timer
         if self._spawn_ms >= SPAWN_MS:
             ob_name = os.path.basename(self.selected_ob)
