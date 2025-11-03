@@ -2,6 +2,8 @@
 #10/28/2025
 #Class to ensure my videos will play perfectly without having to worry about crowding my game.py
 
+#Note for self: Done
+
 import os
 import pygame
 from typing import TYPE_CHECKING, Optional, Sequence
