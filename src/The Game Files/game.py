@@ -17,7 +17,6 @@ from player_icon import Player
 from barriers import Pipe, SCREEN_HEIGHT, PIPE_SPEED #Reused from barriers class
 
 #For my AI Autopilot
-from AI import Autopilot, start_training_async
 import queue
 
 #Sound effects
@@ -161,7 +160,6 @@ class Game:
         #For AI
         self.ai_restart_timer= None
         self.ai_enabled = False
-        self.autopilot: Optional[Autopilot] = None
 
         #Score and flags
         self.score = 0
@@ -189,29 +187,10 @@ class Game:
         self.state = "play"
         self.reset()
 
+    #Start ai version of game
     def start_ai_game(self):
         self.ai_enabled = True
-        #Clear old model so we have a fresh training demo each time
-        if os.path.exists(self.model_path):
-            try: os.remove(self.model_path)
-            except Exception as e: print("Error removing the old model:", e)
 
-        #Reset the graph
-        self.training_data= {"gen": [], "best": [],"avg": []}
-        self.training_q = queue.Queue()
-
-        #check for neat_config.txt
-        cfg_path= os.path.join(os.path.dirname(__file__), "neat-config.txt")
-        if not os.path.isfile(cfg_path):
-            print("Config file not found:", cfg_path)
-
-        self.training_thread = start_training_async(cfg_path, self.model_path,n_generations=33,progress_q=self.training_q)
-        self.neat_is_training = True
-
-        #No model load when first winner is saved
-        self.autopilot = None
-        self.state = "play"
-        self.reset()
 
     def open_customize(self):
         self.state = "customize"# change later
@@ -596,11 +575,17 @@ class Game:
         src_rect = pygame.Rect(0, 0, SCREEN_WIDTH, content_h)
         src_surface = self.canvas.subsurface(src_rect)
 
-        scale= max(win_width/SCREEN_WIDTH, win_height/content_h)
-
-        dst_width, dst_height = int(SCREEN_WIDTH*scale), int(content_h*scale*.75)
-        offset_x= (win_width - dst_width)//2
-        offset_y= (win_height - dst_height)//2
+        #Different scaling when AI is enabled
+        if self.ai_enabled:
+            scale= min(win_width/SCREEN_WIDTH, win_height/content_h)
+            dst_width, dst_height = int(SCREEN_WIDTH*scale*1.78), int(content_h*scale)
+            offset_x= (win_width-dst_width)//2
+            offset_y=0
+        else:
+            scale = max(win_width / SCREEN_WIDTH, win_height / content_h)
+            dst_width, dst_height = int(SCREEN_WIDTH * scale), int(content_h * scale * .75)
+            offset_x = (win_width - dst_width) // 2
+            offset_y = (win_height - dst_height) // 2
 
         frame = pygame.transform.smoothscale(src_surface, (dst_width, dst_height))
         self.screen.fill((0,0,0))
