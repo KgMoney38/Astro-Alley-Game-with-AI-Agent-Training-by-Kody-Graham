@@ -1,5 +1,6 @@
 #Kody Graham, 8/24/2025
 #Generate and control the pipes that act as obstacles
+#Note for self: Done
 
 import os
 import random
@@ -15,12 +16,12 @@ PIPE_MIN_TOP = 100
 PIPE_MAX_TOP = 400
 
 def asset_path(*parts: str) -> str:
-    """Resolve path to asset relative to the png"""
+    #Resolve path to asset relative to the png
     here = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(here, "assets", *parts)
 
 class Pipe:
-    """Scale two pipes one top and one bottom and make them move left """
+    #Scale two pipes one top and one bottom and make them move left
     #Class type cache so it only loads the png one time
     _surfaces: Dict[str, pygame.Surface] = {}
 

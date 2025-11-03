@@ -1,9 +1,14 @@
 #Kody Graham
 #8/24/2025
-import threading
+#Class controls almost all functionality of my game, controls the entire game loop
+
+#Note for self: Done for now
 
 import pygame
 from typing import List, Optional
+import os
+os.environ.setdefault("SDL_VIDEO_CENTERED", "1")
+from launch_video import play_video_cover, play_video_sequence_cover
 
 from menu import MainMenu, CustomizeMenu
 import os, json #For my lifetime highscore
@@ -13,7 +18,6 @@ from barriers import Pipe, SCREEN_HEIGHT, PIPE_SPEED #Reused from barriers class
 
 #For my AI Autopilot
 from AI import Autopilot, start_training_async
-import textwrap
 import queue
 
 #Sound effects
@@ -21,6 +25,8 @@ pygame.mixer.pre_init(44100, -16, 2, 512)
 
 #Fast settings to get to testable tonight
 #Any ALL_CAPS var can be moved to settings .py and passed in
+FULLSCREEN_FLAGS= pygame.FULLSCREEN|pygame.DOUBLEBUF
+WINDOWED_FLAGS= pygame.RESIZABLE|pygame.DOUBLEBUF
 SCREEN_WIDTH = 1000
 FPS = 60
 SPAWN_MS = 1500
@@ -39,6 +45,12 @@ SECRET_KEY= "SECRET-DEMO-KEY-v1:: 9d8d7ea4b6b940aa8b4e2f0a1d5f37"
 SECRET_KEY=os.environ.get("GAME_SECRET", SECRET_KEY)
 BIND_TO_DEVICE= False #So it is available through GitHub to anyone who pulls the repo
 
+HINT_SHOW_MS = 500
+HINT_FADE_MS = 4000
+HINT_ALPHA_START=200
+HINT_BOX_BASE_ALPHA= 255
+
+#Sign method to protect my highscore
 def _sign(score: int, salt: str) -> str:
     device = platform.node() if BIND_TO_DEVICE else ""
     msg = f"{score}|{salt}|{device}".encode("utf-8")
@@ -50,6 +62,7 @@ ASSETS_AUDIO_DIR = os.path.join(audioDir, "assets", "sounds")
 def sound_path(*parts: str) -> str:
     return os.path.join(ASSETS_AUDIO_DIR, *parts)
 
+#Load my all time high score
 def load_high_score() -> int:
     try:
         with open(HIGH_SCORE_FILE, "r", encoding="utf-8") as f:
@@ -67,6 +80,7 @@ def load_high_score() -> int:
     except Exception:
         return 0
 
+#Save my all time high score
 def save_high_score(score: int) -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
     salt = os.urandom(16).hex()
@@ -75,8 +89,14 @@ def save_high_score(score: int) -> None:
     with open(HIGH_SCORE_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f)
 
+#My game logic and implementation class
 class Game:
     def __init__(self) -> None:
+        self.music_paused = None
+        self.fullscreen_exit_fade_until = None
+        self.neat_is_training = None
+        self.is_fullscreen = True
+        self.fullscreen_exit_msg_until = None
         self.screen = None
         self.canvas = None
         self.bg_x = None
@@ -88,14 +108,33 @@ class Game:
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont(None, 50)
 
+        #Play music
+        self._music_paused = False
+        self.start_music(volume=.15)
+
+        #Launch Screen
+        self.custom_window_size(fullscreen=True)
+
+        #Verify my videos that I added to make my game look more professional are available
+        try:
+            assets_dir= os.path.join(os.path.dirname(__file__), "assets", "launch_video")
+            mp4_launch= os.path.join(assets_dir, "launch_video.mp4")
+            mp4_welcome= os.path.join(assets_dir, "welcome_video.mp4")
+
+            #Play the sounds in order
+            mp4s= [p for p in (mp4_launch,mp4_welcome) if os.path.isfile(p)]
+            if mp4s:
+                play_video_sequence_cover(self.screen, mp4s, cap_fps=60, between_fade_ms=160,final_fade_ms=220,sfx_volumes=[.05]*len(mp4s))
+        except Exception as e:
+            print("Intro skipped", e)
+
         #Graph for training model
-        GRAPH_H = 333
-        self.graph_h =GRAPH_H
+        graph_h = 333
+        self.graph_h =graph_h
 
         #Fixed virtual resolution
-        self.virtual_size = (SCREEN_WIDTH, SCREEN_HEIGHT+ GRAPH_H)
+        self.virtual_size = (SCREEN_WIDTH, SCREEN_HEIGHT+ graph_h)
 
-        self.custom_window_size(fullscreen=True)
         self.canvas= pygame.Surface(self.virtual_size).convert()
         self.training_data= {"gen": [], "best": [],"avg": []}
         self.training_thread = None
@@ -119,9 +158,11 @@ class Game:
         self.selected_ob = os. path.join(assets, "obstacle.png")
         self.customize = CustomizeMenu(self)
 
+        #For AI
         self.ai_restart_timer= None
         self.ai_enabled = False
         self.autopilot: Optional[Autopilot] = None
+
         #Score and flags
         self.score = 0
         self.high_score = 0
@@ -131,31 +172,10 @@ class Game:
         self._spawn_ms = 0
         self.running = True
 
-        #Sound effects
-        try:
-            if not pygame.mixer.get_init():
-                pygame.mixer.init(frequency=44100, size =-16,channels=2, buffer=512)
-            pygame.mixer.set_num_channels(8)
-
-            opensource_music_file = sound_path("backgroundmusic.mp3")
-            if not os.path.isfile(opensource_music_file):
-                print("Music file not found", opensource_music_file)
-            else:
-                pygame.mixer.music.load(opensource_music_file)
-                pygame.mixer.music.set_volume((.15))
-                pygame.mixer.music.play(-1,fade_ms=1500)
-            self._music_paused = False
-
-            self.snd_jump = pygame.mixer.Sound(sound_path("jump.wav"))
-            self.snd_crash = pygame.mixer.Sound(sound_path("crash.wav"))
-            self.snd_jump.set_volume(.04)
-            self.snd_crash.set_volume(0.03)
-
-        except Exception as e:
-            print("Audio disabled:", e)
-            self.snd_jump= self.snd_crash = None
-            self._music_paused = True
-
+        self.snd_jump = pygame.mixer.Sound(sound_path("jump.wav"))
+        self.snd_crash = pygame.mixer.Sound(sound_path("crash.wav"))
+        self.snd_jump.set_volume(.04)
+        self.snd_crash.set_volume(0.03)
         self.reset()
 
     #For Main Menu
@@ -259,6 +279,7 @@ class Game:
                 self.all_time_high_score = self.score
                 save_high_score(self.all_time_high_score)
 
+    #Game loop
     def run(self) -> None:
         while self.running:
             dt_ms = self.clock.tick(FPS)
@@ -288,6 +309,7 @@ class Game:
             self._draw()
         pygame.quit()
 
+    #Function for most of my key listeners
     def _handle_events(self) -> None:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -296,15 +318,14 @@ class Game:
             elif event.type == pygame.KEYDOWN:
                 #Will work in both of my game modes
                 if event.key == pygame.K_ESCAPE:
-                    self.open_menu()
-                    #Normal window
-                    if self.state == "menu" and getattr(self, "is_fullscreen", False):
-                        self.is_fullscreen = False
-                        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.RESIZABLE)
-                        continue
+                    if self.state == "menu":
+                        # Toggle windowed if on Main Menu
+                        self.set_fullscreen(not self.is_fullscreen)
                     else:
+                        # If in game go back to main menu and maintain window state
                         self.open_menu()
-                        continue
+                    continue
+
 
                 elif event.key == pygame.K_m:
                     self.toggle_music()
@@ -330,16 +351,34 @@ class Game:
                 elif event.key == pygame.K_RETURN:
                     self.reset()
 
-    def custom_window_size(self, fullscreen: bool= False, margin:int =10)-> None:
+    #Function to set the full screen mode properly
+    def set_fullscreen(self, on: bool) -> None:
+        self.is_fullscreen = on
+
+        if on:
+            pygame.display.quit()
+            pygame.display.init()
+            self.screen = pygame.display.set_mode((0, 0), pygame.NOFRAME| pygame.DOUBLEBUF)
+
+        else:
+            self.screen = pygame.display.set_mode((1280,720), pygame.RESIZABLE |pygame.DOUBLEBUF)
+
+        #Timer for press esc hint
+        now= pygame.time.get_ticks()
+        self.fullscreen_exit_msg_until = now+ HINT_SHOW_MS+2000
+        self.fullscreen_exit_fade_until= now + HINT_FADE_MS
+
+    #Function to scale my game when the window size is adjusted
+    def custom_window_size(self, fullscreen: bool= True, margin:int =10)-> None:
         if fullscreen:
             #Will use pygame to adjust scale later
             self.is_fullscreen = True
-            self.screen = pygame.display.set_mode(0,0), pygame.FULLSCREEN
-            self.fullscreen_exit_msg_until= pygame.time.get_ticks()+5000
+            self.set_fullscreen(fullscreen)
             return
         else:
             #Leaving my windowed path
             self.is_fullscreen = False
+            self.set_fullscreen(self.is_fullscreen)
             #Get screen size
             try:
                 sizes= pygame.display.get_desktop_sizes()
@@ -352,15 +391,17 @@ class Game:
             out_w= max(640, desktop_w-margin*2)
             out_h= max(480, desktop_h-margin*2)
 
-            #Position window this took a while remember it
-            os.environ["SDL_VIDEO_WINDOW_POS"] = f"{margin}, {margin}"
+            #Position window
+            os.environ["SDL_VIDEO_WINDOW_POS"] = "{margin}, {margin}"
 
             self.screen= pygame.display.set_mode((out_w, out_h), pygame.RESIZABLE)
             #self.canvas= pygame.Surface(self.virtual_size).convert()
 
+    #Update the game as it is running
     def _update(self, dt_ms: int) -> None:
 
         #Pull any training progress updates
+        #Needs work start of the NEAT training im going to end up implementing just keeps track of training data
         try:
             while True:
                 upd= self.training_q.get_nowait()
@@ -430,6 +471,7 @@ class Game:
         if self.bg_x <= -self.bg_image.get_width():
             self.bg_x = 0
 
+    #Draw the game screen
     def _draw(self) -> None:
 
         s= self.canvas
@@ -476,6 +518,9 @@ class Game:
 
         if self.game_over:
             s.blit(msg_surface, (cx - msg_surface.get_width() // 2, cy - msg_surface.get_height() // 2))
+            # Alltime high
+            ath_surface = self.font.render(f"All-Time High Score: {self.all_time_high_score}", True, text)
+            s.blit(ath_surface, (cx - ath_surface.get_width() // 2, cy - ath_surface.get_height() // 2 + msg_surface.get_height() + 12))
 
             #AI auto restart
             if self.ai_enabled and self.ai_restart_timer:
@@ -488,7 +533,7 @@ class Game:
 
 
 
-                line1 = self.countdown_label_font.render(f"AI RESTARTING IN...", True, (255,0,0))
+                line1 = self.countdown_label_font.render("AI RESTARTING IN...", True, (255,0,0))
                 line2 = self.countdown_font.render(f"{secs}", True, (255,0,0))
 
                 y1 =cy - 140
@@ -544,28 +589,79 @@ class Game:
             s.blit(legend_best, (panel_w-140, panel_y+6))
             s.blit(legend_avg, (panel_w-80, panel_y+6))
 
+        #Scaling parameters for the game screen
         win_width, win_height = self.screen.get_size()
-        view_width, view_height = self.virtual_size
-        scale= min(win_width/view_width, win_height/view_height)
+        content_h = SCREEN_HEIGHT + (self.graph_h if self.ai_enabled else 0)
 
-        dst_width, dst_height = int(view_width*scale), int(view_height*scale)
-        offset_x= (win_height - dst_width)//2
+        src_rect = pygame.Rect(0, 0, SCREEN_WIDTH, content_h)
+        src_surface = self.canvas.subsurface(src_rect)
+
+        scale= max(win_width/SCREEN_WIDTH, win_height/content_h)
+
+        dst_width, dst_height = int(SCREEN_WIDTH*scale), int(content_h*scale*.75)
+        offset_x= (win_width - dst_width)//2
         offset_y= (win_height - dst_height)//2
 
-        frame = pygame.transform.smoothscale(self.canvas, (dst_width, dst_height))
+        frame = pygame.transform.smoothscale(src_surface, (dst_width, dst_height))
         self.screen.fill((0,0,0))
         self.screen.blit(frame, (offset_x, offset_y))
 
-        if getattr(self,"is_fullscreen",False) and pygame.time.get_ticks() < getattr(self,"fullscreen_exit_msg_until",0):
-            hint=self.hud_font.render('Press "ESC" to Exit Fullscreen', True, (230,230,230))
-            hx=(win_width - hint.get_width())//2
-            hy= 100
-            pygame.draw.rect(self.screen, (0,0,0), (hx-12,hx-12, hy-8, hint.get_width() +24, hint.get_height() +16), border_radius=8)
-            self.screen.blit(hint, (hx,hy))
-
-        #Alltime high
-        if self.game_over:
-            ath_surface= self.font.render(f"All-Time High Score: {self.all_time_high_score}", True, text)
-            s.blit(ath_surface,(cx- ath_surface.get_width() // 2, cy - ath_surface.get_height() // 2 + msg_surface.get_height() +12))
+        if self.is_fullscreen:
+            self.draw_fullscreen_hint(self.screen)
 
         pygame.display.flip()
+
+    #Self Explanatory
+    def draw_fullscreen_hint(self, surface: pygame.Surface)->None:
+        if not getattr(self,"is_fullscreen",False):
+            return
+
+        now= pygame.time.get_ticks()
+        show_until = getattr(self,"fullscreen_exit_msg_until",0) or 0
+        fade_until = getattr(self,"fullscreen_exit_fade_until",0) or 0
+
+        if now>= fade_until:
+            return
+
+        if now< show_until:
+            alpha=HINT_ALPHA_START
+        else:
+            p = (fade_until-now)/float(HINT_FADE_MS)
+
+            p= 1-(1-p) *(1-p)
+
+            alpha = max(0,min(255, int(HINT_ALPHA_START*p)))
+
+        hint = self.hud_font.render('Press "ESC" to Exit Fullscreen', True, (230, 230, 230))
+        hx = (self.screen.get_width() - hint.get_width()) // 2
+        hy = 120
+        pad_x, pad_y =12,8
+        box_w = hint.get_width()+2*pad_x
+        box_h = hint.get_height()+2*pad_y
+
+        container = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        container.fill((0,0,0, HINT_BOX_BASE_ALPHA))
+        container.blit(hint, (pad_x,pad_y))
+        container.set_alpha(alpha)
+
+        surface.blit(container, (hx-pad_x,hy-pad_y))
+
+    #Self Explanatory
+    def start_music(self, volume):
+        # Music
+        self._music_paused = False
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
+                pygame.mixer.set_num_channels(8)
+
+            if not pygame.mixer.music.get_busy():
+                opensource_music_file = sound_path("backgroundmusic.mp3")
+                if os.path.isfile(opensource_music_file):
+                    pygame.mixer.music.load(opensource_music_file)
+                    pygame.mixer.music.set_volume(volume)
+                    pygame.mixer.music.play(-1, fade_ms=1200)
+            self.music_paused = False
+        except Exception as e:
+            print("Audio Disabled: ", e)
+            self._music_paused = True

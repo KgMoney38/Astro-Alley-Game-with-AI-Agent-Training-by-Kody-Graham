@@ -1,16 +1,19 @@
 #Kody Graham, 8/24/2025
 #Class that will control my player icon in the game, it will handle the gravity effect and the jump.
 
+#Note for self: Done
+
 import os
 from typing import Tuple, Optional
 import pygame
 
 #Resolve the path so that the image will always load correctly
 def asset_path(*parts: str) -> str:
-    """Resolve assets so the file will load from any working directory"""
+    #Resolve assets so the file will load from any working directory
     here = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(here, "assets", *parts)
 
+#Class for my user and ai ships
 class Player:
     def __init__(self, x: int, y: int, image_name: str = "ship.png", size: Tuple[int,int] = (100, 50), ) -> None:
 
@@ -48,7 +51,7 @@ class Player:
         self._flame_base = pygame.transform.smoothscale(self.flame_base, (fw, fh))
 
     def ignite(self) -> None:
-        """Call when space pressed."""
+        #Call when space pressed
         self.flame_ms_left = self.flame_duration_ms
 
     def jump(self) -> None:
@@ -91,7 +94,7 @@ class Player:
         #Debug safe area around ship
         #pygame.draw.rect(surface, pygame.Color("purple"), self.rect,2)
 
-
+    #Self Explanatory
     def reset(self, x: Optional[int] = None, y: Optional[int] = None) -> None:
         if x is not None or y is not None:
             cx = x if x is not None else self.rect.centerx
