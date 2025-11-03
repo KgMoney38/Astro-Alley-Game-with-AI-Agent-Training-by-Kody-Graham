@@ -6,7 +6,7 @@
 
 import pygame
 import os
-
+from launch_video import play_video_cover #For my customize launch video
 
 
 def asset_path(*parts: str) -> str:
@@ -256,6 +256,17 @@ class CustomizeMenu:
 
     #Self explanatory
     def _save_and_start(self):
+
+        #Play my customize video
+        try:
+            vid_dir= asset_path("launch_video")
+            mp4 = os.path.join(vid_dir,"customize_video.mp4")
+            if os.path.isfile(mp4):
+                play_video_cover(self.game.screen, mp4,cap_fps=60,fade_out_ms=220)
+        except Exception as e:
+            print("Customize launch skipped",e)
+
+        #Existing save and start
         if self.ships: self.game.selected_ship = asset_path(self.ships[self.ship_idx][0])
         if self.bgs: self.game.selected_bg = asset_path(self.bgs[self.bg_idx][0])
         if self.obs: self.game.selected_ob = asset_path(self.obs[self.ob_idx][0])
