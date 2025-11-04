@@ -1,12 +1,15 @@
 #Kody Graham
 #8/24/2025
 #Class controls almost all functionality of my game, controls the entire game loop
+from collections import deque
 
 #Note for self: Done for now
 
 import pygame
 from typing import List, Optional
 import os
+
+
 os.environ.setdefault("SDL_VIDEO_CENTERED", "1")
 from launch_video import play_video_cover, play_video_sequence_cover
 
@@ -18,6 +21,7 @@ from barriers import Pipe, SCREEN_HEIGHT, PIPE_SPEED #Reused from barriers class
 
 #For my AI Autopilot
 import queue
+from autopilot_torch import TorchPolicy
 
 #Sound effects
 pygame.mixer.pre_init(44100, -16, 2, 512)
@@ -135,11 +139,9 @@ class Game:
         self.virtual_size = (SCREEN_WIDTH, SCREEN_HEIGHT+ graph_h)
 
         self.canvas= pygame.Surface(self.virtual_size).convert()
-        self.training_data= {"gen": [], "best": [],"avg": []}
-        self.training_thread = None
-        self.model_path = os.path.join(os.path.dirname(__file__), "best_model.pkl")
-        self.neat_is_trained = False
-        self.training_q = queue.Queue()
+
+        #New graph, going to use a vertical error buffer
+        self.vert_err = deque(maxlen=1200)
 
         #AI indicator
         self.hud_font = pygame.font.SysFont(None, 33)
@@ -155,6 +157,8 @@ class Game:
         self.selected_ship = os. path.join(assets, "ship.png")
         self.selected_bg = os.path.join(assets, "strip_background.png")
         self.selected_ob = os. path.join(assets, "obstacle.png")
+        self.policy_path = os.path.join(os.path.dirname(__file__), "flappy_policy.pt")
+        self.autopilot=None
         self.customize = CustomizeMenu(self)
 
         #For AI
@@ -187,9 +191,22 @@ class Game:
         self.state = "play"
         self.reset()
 
-    #Start ai version of game
+    #Start ai version of game using a PyTorch policy i will train
     def start_ai_game(self):
         self.ai_enabled = True
+
+        #Reset old graph
+        self.vert_err.clear()
+
+        #Build Torch policy
+        try:
+            self.autopilot = TorchPolicy(ckpt_path=self.policy_path)
+        except Exception as e:
+            print("AI Failed to load Torch policy", e)
+            self.autopilot = TorchPolicy(ckpt_path=None)
+
+        self.state = "play"
+        self.reset()
 
 
     def open_customize(self):
@@ -218,6 +235,9 @@ class Game:
        self._spawn_ms = 0
        self.player.flame_ms_left = 0
        self.ai_restart_timer=None
+
+       #Clear my graph on new run
+       self.vert_err.clear()
 
 
 
@@ -257,6 +277,11 @@ class Game:
             if self.score > self.all_time_high_score:
                 self.all_time_high_score = self.score
                 save_high_score(self.all_time_high_score)
+
+    #Closest pipe whose edge hasnt passed ship
+    def next_pipe(self):
+        future = [p for p in self.pipes if (p.x + p.width) >= BIRD_START_X]
+        return min(future, key=lambda p: p.x) if future else None
 
     #Game loop
     def run(self) -> None:
@@ -379,17 +404,6 @@ class Game:
     #Update the game as it is running
     def _update(self, dt_ms: int) -> None:
 
-        #Pull any training progress updates
-        #Needs work start of the NEAT training im going to end up implementing just keeps track of training data
-        try:
-            while True:
-                upd= self.training_q.get_nowait()
-                self.training_data["gen"].append(upd["gen"])
-                self.training_data["best"].append(upd["best"])
-                self.training_data["avg"].append(upd["avg"])
-        except queue.Empty:
-            pass
-
         #Auto restart for AI Mode
         if self.ai_enabled and self.game_over and self.ai_restart_timer is not None:
             if pygame.time.get_ticks() >= self.ai_restart_timer:
@@ -445,6 +459,15 @@ class Game:
         if bird_rect.bottom > SCREEN_HEIGHT or bird_rect.top < 0:
             self._on_game_over()
 
+        #Vertical error for my graph
+        p=self.next_pipe()
+        if p is not None:
+            top_rect, bot_rect = p.rects()
+            gap_cy=.5* (top_rect.bottom + bot_rect.top)
+            ship_cy = self.player.get_rect().centery
+            self.vert_err.append(float(gap_cy-ship_cy)) #0 means perfectly centered
+
+
         #Scroll background image
         self.bg_x -= scroll_speed
         if self.bg_x <= -self.bg_image.get_width():
@@ -482,7 +505,7 @@ class Game:
 
         #AI Badge
         if self.ai_enabled:
-            mode= "NEAT"
+            mode= "Torch"
             label = self.hud_font.render(f"AI: {mode}", True, text)
             pad =6
             bg_rect= pygame.Rect(12-pad,12-pad,label.get_width()+pad*2,label.get_height()+ pad*2)
@@ -521,52 +544,63 @@ class Game:
                 s.blit(line2, (cx-line2.get_width()//2,y2))
 
         if self.ai_enabled:
-            #My AI training graph
+            #My center line error graph
             panel_y=SCREEN_HEIGHT
             panel_h= self.graph_h
             panel_w = s.get_width()
+
+            #panel background
             pygame.draw.rect(s, (10,10,20), (0,panel_y,panel_w, panel_h))
-            axis_color=(80,80,100)
-            pygame.draw.line(s, axis_color, (50,panel_y+20),(50, panel_y+panel_h-30), 1)
-            pygame.draw.line(s,axis_color,(50,panel_y+panel_h-30),(panel_w-20, panel_y+panel_h-30),1)
 
             #Labels
-            label= self.hud_font.render("NEAT Training (Best/Average)", True, (200,200,233))
+            label= self.hud_font.render("Vertical Error: 0 = Centered", True, (255,0,0))
             s.blit(label, (40,panel_y+4))
 
-            gens= self.training_data["gen"]
-            best= self.training_data["best"]
-            avg= self.training_data["avg"]
+            #Plot
+            x0 =60
+            x1 = panel_w-30
+            y0 = panel_y+panel_h-33
+            y1 = panel_y+25
+            width= x1-x0
+            height = y0-y1
 
-            if gens:
-                x0 =60
-                x1 = panel_w-30
-                y0 = panel_y+panel_h-33
-                y1 = panel_y+25
-                width= x1-x0
-                height = y0-y1
+            data = list(self.vert_err)
 
-            max_fit = max(max(best) if best else 1, max(avg) if avg else 1,1)
-            def pt(i,arr):
-                #Map gen index to x and fitness to y
-                xi= x0+ (i/max(1, len(gens)-1))*width
-                yi = y0- (arr[i]/max_fit)*height
-                return int(xi),int(yi)
+            #Draw my grid
+            grid_color=(0,0,255)
+            gx=8
+            gy=4
+            for i in range(1,gx):
+                xi= x0 + int(width*i/gx)
+                pygame.draw.line(s, grid_color, (xi, y1), (xi,y0), 1)
+            for i in range(1,gy):
+                yi=y1+ int(height*i/gy)
+                pygame.draw.line(s, grid_color, (x0, yi), (x1,yi), 1)
 
-            #Draw the lines
-            def draw_series(arr, color):
-                if len(arr) >=2:
-                    for i in range(1,len(arr)):
-                        pygame.draw.line(s, color, pt(i-1, arr), pt(i,arr), 2)
+            if len(data) >= 2:
+                lo = min(min(data),.0)
+                hi = max(max(data),.0)
+                rng= hi - lo if hi>lo else 1
 
-            draw_series(best, (240,100,120))
-            draw_series(avg, (120,130,220))
+                #Baseline=0
+                zy= y0 - int(((0-lo)/rng)*height)
+                pygame.draw.line(s, (80, 80, 100), (x0, zy), (x1,zy), 1)
 
-            #Legend for graph
-            legend_best= self.hud_font.render("Best", True, (180,240,180))
-            legend_avg= self.hud_font.render("Avg", True, (180,220,240))
-            s.blit(legend_best, (panel_w-140, panel_y+6))
-            s.blit(legend_avg, (panel_w-80, panel_y+6))
+                #line
+                pts=[]
+                n= len(data)
+                for i, v in enumerate(data):
+                    px= x0 + int(i/(n-1)*width)
+                    py= y0 - int(((v-lo)/rng)*height)
+                    pts.append((px,py))
+                pygame.draw.lines(s,(120,180,255), False, pts, 2)
+
+                #Quick stats
+                cur = data[-1]
+                k =min(600, len(data))
+                mae= sum(abs(x) for x in data[-k:])/float(k)
+                stat= self.hud_font.render(f"now: {cur:+.1f}px | MAE (recent): {mae:.1f}px", True, (200,200,233))
+                s.blit(stat, (int(x1-SCREEN_WIDTH*.38), y1-22))
 
         #Scaling parameters for the game screen
         win_width, win_height = self.screen.get_size()
