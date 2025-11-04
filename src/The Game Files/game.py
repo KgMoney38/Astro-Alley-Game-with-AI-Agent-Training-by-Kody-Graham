@@ -1,6 +1,7 @@
 #Kody Graham
 #8/24/2025
 #Class controls almost all functionality of my game, controls the entire game loop
+import sys
 from collections import deque
 
 #Note for self: Done for now
@@ -20,7 +21,9 @@ from player_icon import Player
 from barriers import Pipe, SCREEN_HEIGHT, PIPE_SPEED #Reused from barriers class
 
 #For my AI Autopilot
-import queue
+AI_DIR= os.path.dirname(os.path.realpath(__file__), "The AI Files")
+if AI_DIR not in sys.path:
+    sys.path.insert(0,AI_DIR)
 from autopilot_torch import TorchPolicy
 
 #Sound effects
@@ -157,7 +160,7 @@ class Game:
         self.selected_ship = os. path.join(assets, "ship.png")
         self.selected_bg = os.path.join(assets, "strip_background.png")
         self.selected_ob = os. path.join(assets, "obstacle.png")
-        self.policy_path = os.path.join(os.path.dirname(__file__), "flappy_policy.pt")
+        self.policy_path = os.path.join(AI_DIR, "flappy_policy.pt")
         self.autopilot=None
         self.customize = CustomizeMenu(self)
 
