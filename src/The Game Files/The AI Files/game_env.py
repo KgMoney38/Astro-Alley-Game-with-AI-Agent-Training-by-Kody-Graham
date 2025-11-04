@@ -39,7 +39,7 @@ class GameEnv:
         self.pipe_dx = pipe_dx
         self.gravity = float(gravity)
         self.jump_impulse = float(jump_impulse)
-        self.term_on_wall = bool(terminate_on_impact)
+        self.terminate_on_impact = bool(terminate_on_impact)
         self.max_steps = int(max_steps)
 
         #My agent state
@@ -52,11 +52,103 @@ class GameEnv:
         self.rng = random.Random(42) #RNG default will override later
 
         #Spawn anchor for when to add pipes
-        self._spawn_anchor_x=None
+        self.spawn_anchor_x=None
 
-    def reset(self):
+    def reset(self, seed:int|None=None):
+        if seed is not None: #To help determine a final seed value later
+            self.rng = random.Random(int(seed))
 
-    def step(self):
+        self.py = self.height * .5 #Start y position center everytime
+        self.vy = 0
+        self.steps = 0 #Step counter
+
+        self.pipes.clear()
+        first_gap = self.rand_gap() #Set random gap for first pipe
+        first_x = self.width +120
+
+        #Pipe object
+        self.pipes.append(_Pipe(x=first_x,width=self.pipe_width,gap_y=first_gap[0],gap_h=first_gap[1]))
+
+        self.spawn_anchor_x=first_x #Initialize spawn anchor to pipe x
+
+    #Determine if autopilot should increase - vertical velocity or wait
+    def step(self, action: int):
+        # Action 0=no jump, 1=jump
+        self.steps += 1
+
+        #Apply autopilot action
+        if int(action) == 1:
+            self.vy = self.jump_impulse
+        self.vy += self.gravity
+
+        self.vy = float(max(-25, min(25,self.vy))) #Limit the velocity
+        self.py += self.vy #Integrate velocity for new y pos
+
+        #Move pipes
+        for pipe in self.pipes:
+            pipe.x -= self.pipe_speed
+
+        #Spawn new pipes
+        if self.pipes:
+            last = self.pipes[-1]
+            if last.x<= self.spawn_anchor_x - self.pipe_dx:
+                gy,gh = self.rand_gap()
+                nx = last.x + self.pipe_dx
+                self.pipes.append(_Pipe(x=nx,width=self.pipe_width,gap_y=gy,gap_h=gh))
+                self.spawn_anchor_x=nx
+        else:
+            gy,gh = self.rand_gap()
+            self.pipes.append(_Pipe(x=self.width +120, width= self.pipe_width,gap_y=gy,gap_h=gh))
+            self.spawn_anchor_x= self.pipes[-1].x
+
+        #Delete off screen pipes
+        self.pipes = [ pipe for pipe in self.pipes if pipe.x +pipe.width > 0 ]
+
+        #Compute the reward and termination
+        reward = 0.0 #No reward to start
+        terminated = False
+        truncated = False #Time limit check for max_steps in an episode
+
+        #Collision Detection
+        #Wall
+        hit_top = self.py<0
+        hit_bottom = self.py> self.height
+        if (hit_top or hit_bottom) and self.terminate_on_impact:
+            terminated = True
+            reward-=1.0
+
+        #Pipe
+        collided, passed = self.collision_and_pass()
+        if collided:
+            reward -=1.0
+            terminated = True
+        if passed:
+            reward += 1.0
+
+        #Dense shape
+        #Encourage being centered in gap when pipe close
+        p= self.next_pipe()
+        if p is not None:
+            cx = p.x +.5 * p.width
+            dx = cx- self.px
+            cy = p.gap_y
+            half_gap = .5 * max(1.0,float(p.gap_h))
+
+            #Only shape when pipe close
+            if 0 <= dx <= 280:
+                dy_norm = abs(self.py - cx)/half_gap
+                reward += .03* (1- min(1,dy_norm))
+
+        #Small survival reward and small penalty to discourage spam jumping
+        reward += .005
+        if int(action) == 1:
+            reward -= .002
+
+
+
+
+
+
 
     def rand_gap(self):
 
