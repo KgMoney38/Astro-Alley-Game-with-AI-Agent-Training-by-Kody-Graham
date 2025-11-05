@@ -76,15 +76,17 @@ class TorchPolicy:
             x = x.unsqueeze(0) #Add a dimension to my batch
         return x.to(self.device)
 
-    #Observation
+    #Observation builder same five dimension as training, HAS TO MATCH TRAINING!
     def make_obs(self, player, pipes, screen_h: int, screen_w: int = 1000) -> np.ndarray:
         pr = player.get_rect()
-        px = float(pr.centerx)
-        py = float(pr.centery)
+        px = float(pr.centerx) #Player center x
+        py = float(pr.centery) #Center y
 
+        #Read vertical velocity
         vy = float(getattr(player, "vel_y", getattr(player, "vy",0)))
-        vy_norm = np.clip(vy/800, -1.5,1.5)
+        vy_norm = np.clip(vy/800, -1.5,1.5) #Normalize it
 
+        #Find next pipe
         next_pipe = None
         nearest_dx = 1e9
 
@@ -94,6 +96,7 @@ class TorchPolicy:
                 nearest_dx = dx
                 next_pipe = p
 
+        #Fallback, use a fake but reasonable pipe if there are none
         if next_pipe is None:
             class Fake:
                 pass
@@ -106,22 +109,26 @@ class TorchPolicy:
                 return fake_top, fake_bottom
             next_pipe.rects = rects
 
+        #Derive the gap center/height
         top_rect, bottom_rect = next_pipe.rects()
         gap_top= float(top_rect.bottom)
         gap_bot = float(bottom_rect.top)
         gap_h = max(1, gap_bot - gap_top)
         gap_center_y= gap_top +.5*gap_h
 
+        #Time to gap normalized
         try:
             from barriers import PIPE_SPEED
             pipe_speed = float(PIPE_SPEED)
         except Exception:
             pipe_speed = 4
 
+        #dx= player horizontal distance
         dx_to_gap_front = float(next_pipe.x -px)
         frames_to_gap = dx_to_gap_front / max(1e-6, pipe_speed)
         t2g_norm = float(np.clip(frames_to_gap/60,-1,1))
 
+        #Vertical offset to gap center, normalize gap size
         gap_center_offset = float((gap_center_y - py)/ float(screen_h))
         gap_h_norm= float(min(1,gap_h / float(screen_h)))
 
@@ -129,18 +136,19 @@ class TorchPolicy:
 
         return obs
 
+    #The actual policy decision, return true if ai decides to jump this frame
     def decide(self, player, pipes, screen_h: int, screen_w: int = 1000, min_jump_ms: int =120) -> bool:
 
         now= int(time.time() * 1000)
-        obs = self.make_obs(player, pipes, screen_h, screen_w)
-        x= self.to_tensor(obs)
+        obs = self.make_obs(player, pipes, screen_h, screen_w) #Build from game state
+        x= self.to_tensor(obs) #Convert to a device tensor with my batch dimensions
 
-        with torch.no_grad():
+        with torch.no_grad(): #Stop tracking for faster infer
             logits, _ = self.model(x)
-            action = int(torch.argmax(logits, dim=1).item())
+            action = int(torch.argmax(logits, dim=1).item()) #Pick action with highest logit, 0= no 1= jump
 
         if action ==1 and (now- self.last_jump_ms) >= min_jump_ms:
             self.last_jump_ms = now
-            return True
+            return True #Signal to the game that we should jump
         return False
 
