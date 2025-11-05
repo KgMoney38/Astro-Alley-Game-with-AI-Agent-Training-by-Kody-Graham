@@ -144,16 +144,92 @@ class GameEnv:
         if int(action) == 1:
             reward -= .002
 
+        #Time limit
+        if self.steps >= self.max_steps:
+            truncated = True
 
+        obs = self.get_obs() #Build next observation
+        return obs, float(reward), bool(terminated), bool(truncated), {}
 
+    #Helpers
+    def rand_gap(self) -> tuple[float,int]:
+        gh = self.rng.randint(self.gap_range[0],self.gap_range[1]) #Sample gap height
 
-
-
-
-    def rand_gap(self):
+        #Keep the gap all the way in the screen
+        top_margin=40
+        bottom_margin= 40
+        gmin= top_margin +gh/2
+        gmax = self.height - bottom_margin - gh/2
+        cy = self.rng.uniform(gmin,gmax)
+        return cy,gh
 
     def next_pipe(self):
+        #Pipe center from the smallest positive dx from my ship
+        best= None
+        best_dx= math.inf #Smallest positive dx
 
+        for pipe in self.pipes:
+            cx = pipe.x + .5 * pipe.width
+            dx = cx-self.px
+
+            #Need the closest non passed pipe
+            if dx >= -1e-6 and dx < best_dx:
+                best_dx = dx
+                best = pipe
+
+        return best
+
+    #Pipes will just be considered as 2 rectangles and the gap will obviously be in the middle
     def collision_and_pass(self):
+        collided = False
+        passed = False
+        player_w, player_h= 100, 50 #Same as my actually player icon for consistent training and real game parameters
+        px1 = self.px - player_w*.5
+        px2 = self.px + player_w*.5
+        py1 = self.py - player_h*.5
+        py2 = self.py + player_h*.5
+
+        for pipe in self.pipes:
+            top_rect= (pipe.x,0,pipe.width, pipe.gap_y-pipe.gap_h*.5)
+            bottom_rect= (pipe.x, pipe.gap_y+ pipe.gap_h*.5, pipe.width, self.height - (pipe.gap_y + pipe.gap_h*.5))
+
+            #AABB vs top and bottom
+            if self.axis_aligned_bound_box(px1,py1, player_w, player_h*top_rect) or \ 
+               self.axis_aligned_bound_box(px1,py1,player_w, player_h*bottom_rect):
+                collided = True
+                
+                #Pass center check
+                cx = pipe.x +.5 * pipe.width
+                if cx < self.px <= cx + self.pipe_speed:
+                    passed = True
+        
+        return collided, passed
+
+    #Test between rectangles A and B
+    @staticmethod
+    def axis_aligned_bound_box(ax,ay, aw, ah, bx,by, bw,bh) -> bool:
+        return (ax<bx +bw) and (ax+aw> bx) and (ay < by+bh) and (ay+ ah> by)
+    
+    def get_obs(self)-> np.ndarray:
+        py= float(self.py)
+        vy= float(self.vy) #Velocity
+        next_pipe= self.next_pipe()
+        
+        if next_pipe is None:
+            return np.array([py/self.height, max(-1.5, min(1.5, vy/ 800)),0,0, 120/self.height], dtype=np.float32)
+        
+        cx= next_pipe.x+ .5 * next_pipe.width
+        dx = cx - self.px
+        t2g = dx/ max(1,self.pipe_speed)
+        norm_t2g= max(-1,min(1, t2g/60))
+        
+        cy = next_pipe.gap_y
+        gh = float(next_pipe.gap_height)
+
+        #[0] vertical pos normalized, [1]normalized velocity, [2] normalized time to gap center, [3] offset to gap center, [4] normal gap height
+        return np.array([py/self.height, max(-1.5, min(1.5,vy/800)), norm_t2g, (cy-py)/ self.height, gh/ self.height], dtype=np.float32)
+        
+        
+
 
 
