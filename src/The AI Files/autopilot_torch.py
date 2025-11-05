@@ -3,6 +3,8 @@
 
 #This file will handle my PyTorch policy for my AI mode
 
+#Note for self: Done for now
+
 from __future__ import annotations
 
 import os
@@ -12,11 +14,6 @@ import time
 import numpy as np
 import torch #PyTorch core library
 import torch.nn as nn #PyTorch neural net modules
-
-#Because i wanted my AI related .py files clearly separated in a different directory
-BARRIERS_DIR= os.path.join(os.path.dirname(__file__), "The Game Files")
-if BARRIERS_DIR not in sys.path:
-    sys.path.insert(0, BARRIERS_DIR)
 
 #Model will define both policy and value
 class ActorCritic(nn.Module):
@@ -36,7 +33,7 @@ class TorchPolicy:
     def __init__(self, ckpt_path: str | None, device:str | None = None):
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu")) #Try to use CUDA because using the graphics card will be more efficient
         self.hidden = 64
-        self.model = ActorCritic(self.hidden).to(self.device)
+        self.model = ActorCritic(hidden=self.hidden).to(self.device)
         self.last_jump_ms = 0
 
         if ckpt_path and os.path.isfile(ckpt_path): #Check checkpoint path
@@ -113,20 +110,26 @@ class TorchPolicy:
         top_rect, bottom_rect = next_pipe.rects()
         gap_top= float(top_rect.bottom)
         gap_bot = float(bottom_rect.top)
-        gap_h = max(1, gap_bot - gap_top)
+        gap_h = max(1.0, gap_bot - gap_top)
         gap_center_y= gap_top +.5*gap_h
 
         #Time to gap normalized
         try:
+            # Because i wanted my AI related .py files clearly separated in a different directory
+            BARRIERS_DIR = os.path.join(os.path.dirname(__file__), "..", "The Game Files")
+            if BARRIERS_DIR not in sys.path:
+                sys.path.insert(0, BARRIERS_DIR)
+
             from barriers import PIPE_SPEED
             pipe_speed = float(PIPE_SPEED)
+
         except Exception:
-            pipe_speed = 4
+            pipe_speed = 4.0
 
         #dx= player horizontal distance
-        dx_to_gap_front = float(next_pipe.x -px)
+        dx_to_gap_front = float(next_pipe.x-px)
         frames_to_gap = dx_to_gap_front / max(1e-6, pipe_speed)
-        t2g_norm = float(np.clip(frames_to_gap/60,-1,1))
+        t2g_norm = float(np.clip(frames_to_gap/60.0,-1.0,1.0))
 
         #Vertical offset to gap center, normalize gap size
         gap_center_offset = float((gap_center_y - py)/ float(screen_h))

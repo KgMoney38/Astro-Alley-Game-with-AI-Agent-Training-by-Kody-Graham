@@ -1,11 +1,11 @@
 #Kody Graham
 #8/24/2025
 #Class controls almost all functionality of my game, controls the entire game loop
-import sys
-from collections import deque
 
 #Note for self: Done for now
 
+import sys
+from collections import deque
 import pygame
 from typing import List, Optional
 import os
@@ -21,9 +21,11 @@ from player_icon import Player
 from barriers import Pipe, SCREEN_HEIGHT, PIPE_SPEED #Reused from barriers class
 
 #For my AI Autopilot
-AI_DIR= os.path.dirname(os.path.realpath(__file__), "The AI Files")
+BASE_DIR = os.path.dirname(__file__)
+AI_DIR= os.path.abspath(os.path.join(BASE_DIR, "..", "The AI Files"))
 if AI_DIR not in sys.path:
     sys.path.insert(0,AI_DIR)
+
 from autopilot_torch import TorchPolicy
 
 #Sound effects
@@ -424,6 +426,8 @@ class Game:
                 if self.autopilot.decide(self.player, self.pipes, SCREEN_HEIGHT):
                     self.player.jump()
                     self.player.ignite()
+                    if self.snd_jump:
+                        self.snd_jump.play()
             except Exception as e:
                 #Failsafe
                 print(f"[AUTOPILOT ERROR!] {e}")
@@ -556,7 +560,7 @@ class Game:
             pygame.draw.rect(s, (10,10,20), (0,panel_y,panel_w, panel_h))
 
             #Labels
-            label= self.hud_font.render("Vertical Error: 0 = Centered", True, (255,0,0))
+            label= self.hud_font.render("Vertical Error: 0 = Center of Next Pipe", True, (255,0,0))
             s.blit(label, (40,panel_y+4))
 
             #Plot
@@ -570,7 +574,7 @@ class Game:
             data = list(self.vert_err)
 
             #Draw my grid
-            grid_color=(0,0,255)
+            grid_color=(155,0,255)
             gx=8
             gy=4
             for i in range(1,gx):
@@ -587,7 +591,7 @@ class Game:
 
                 #Baseline=0
                 zy= y0 - int(((0-lo)/rng)*height)
-                pygame.draw.line(s, (80, 80, 100), (x0, zy), (x1,zy), 1)
+                pygame.draw.line(s, (255, 0, 0), (x0, zy), (x1,zy), 1)
 
                 #line
                 pts=[]
@@ -596,14 +600,14 @@ class Game:
                     px= x0 + int(i/(n-1)*width)
                     py= y0 - int(((v-lo)/rng)*height)
                     pts.append((px,py))
-                pygame.draw.lines(s,(120,180,255), False, pts, 2)
+                pygame.draw.lines(s,(0,0,255), False, pts, 2)
 
                 #Quick stats
                 cur = data[-1]
                 k =min(600, len(data))
                 mae= sum(abs(x) for x in data[-k:])/float(k)
-                stat= self.hud_font.render(f"now: {cur:+.1f}px | MAE (recent): {mae:.1f}px", True, (200,200,233))
-                s.blit(stat, (int(x1-SCREEN_WIDTH*.38), y1-22))
+                stat= self.hud_font.render(f"Live Error: now: {cur:+.1f}px | MAE (recent): {mae:.1f}px", True, (0,0,255))
+                s.blit(stat, (int(x1-SCREEN_WIDTH*.5), y1-22))
 
         #Scaling parameters for the game screen
         win_width, win_height = self.screen.get_size()

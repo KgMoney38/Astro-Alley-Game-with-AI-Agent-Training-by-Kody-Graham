@@ -70,6 +70,8 @@ class GameEnv:
         self.pipes.append(_Pipe(x=first_x,width=self.pipe_width,gap_y=first_gap[0],gap_h=first_gap[1]))
 
         self.spawn_anchor_x=first_x #Initialize spawn anchor to pipe x
+        obs = self.get_obs()
+        return obs, {}
 
     #Determine if autopilot should increase - vertical velocity or wait
     def step(self, action: int):
@@ -81,7 +83,7 @@ class GameEnv:
             self.vy = self.jump_impulse
         self.vy += self.gravity
 
-        self.vy = float(max(-25, min(25,self.vy))) #Limit the velocity
+        self.vy = float(max(-25.0, min(25.0,self.vy))) #Limit the velocity
         self.py += self.vy #Integrate velocity for new y pos
 
         #Move pipes
@@ -136,7 +138,7 @@ class GameEnv:
 
             #Only shape when pipe close
             if 0 <= dx <= 280:
-                dy_norm = abs(self.py - cx)/half_gap
+                dy_norm = abs(self.py - cy)/half_gap
                 reward += .03* (1- min(1,dy_norm))
 
         #Small survival reward and small penalty to discourage spam jumping
@@ -183,7 +185,8 @@ class GameEnv:
     def collision_and_pass(self):
         collided = False
         passed = False
-        player_w, player_h= 100, 50 #Same as my actually player icon for consistent training and real game parameters
+        player_w, player_h= 150, 60 #Same as my actually player icon for consistent training and real game parameters
+                                    #For tighter fit i increased size player size here for training but left it the same in player_icon
         px1 = self.px - player_w*.5
         px2 = self.px + player_w*.5
         py1 = self.py - player_h*.5
@@ -194,14 +197,14 @@ class GameEnv:
             bottom_rect= (pipe.x, pipe.gap_y+ pipe.gap_h*.5, pipe.width, self.height - (pipe.gap_y + pipe.gap_h*.5))
 
             #AABB vs top and bottom
-            if self.axis_aligned_bound_box(px1,py1, player_w, player_h*top_rect) or \ 
-               self.axis_aligned_bound_box(px1,py1,player_w, player_h*bottom_rect):
+            if self.axis_aligned_bound_box(px1,py1, player_w, player_h,*top_rect) or \
+               self.axis_aligned_bound_box(px1,py1,player_w, player_h,*bottom_rect):
                 collided = True
                 
-                #Pass center check
-                cx = pipe.x +.5 * pipe.width
-                if cx < self.px <= cx + self.pipe_speed:
-                    passed = True
+            #Pass center check
+            cx = pipe.x +.5 * pipe.width
+            if cx < self.px <= cx + self.pipe_speed:
+                passed = True
         
         return collided, passed
 
@@ -220,11 +223,11 @@ class GameEnv:
         
         cx= next_pipe.x+ .5 * next_pipe.width
         dx = cx - self.px
-        t2g = dx/ max(1,self.pipe_speed)
-        norm_t2g= max(-1,min(1, t2g/60))
+        t2g = dx/ max(1.0,self.pipe_speed)
+        norm_t2g= max(-1.0,min(1.0, t2g/60))
         
         cy = next_pipe.gap_y
-        gh = float(next_pipe.gap_height)
+        gh = float(next_pipe.gap_h)
 
         #[0] vertical pos normalized, [1]normalized velocity, [2] normalized time to gap center, [3] offset to gap center, [4] normal gap height
         return np.array([py/self.height, max(-1.5, min(1.5,vy/800)), norm_t2g, (cy-py)/ self.height, gh/ self.height], dtype=np.float32)

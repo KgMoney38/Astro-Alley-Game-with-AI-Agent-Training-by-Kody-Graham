@@ -57,6 +57,7 @@ class Player:
     def jump(self) -> None:
         self.vel_y = self.jump_strength
 
+
     def update(self, dt_ms: int) -> None:
         #Apply the gravity effect
         self.vel_y += self.gravity
