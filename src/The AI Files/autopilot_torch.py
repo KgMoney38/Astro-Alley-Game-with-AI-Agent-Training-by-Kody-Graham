@@ -8,9 +8,9 @@
 from __future__ import annotations
 
 import os
-import sys
 import warnings
 import time
+
 import numpy as np
 import torch #PyTorch core library
 import torch.nn as nn #PyTorch neural net modules
@@ -30,13 +30,19 @@ class ActorCritic(nn.Module):
 
 #Policy wrapper for game will be what my game calls to decide when to jump
 class TorchPolicy:
-    def __init__(self, ckpt_path: str | None, device:str | None = None):
+    def __init__(self, ckpt_path: str | None= None, device:str | None = None):
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu")) #Try to use CUDA because using the graphics card will be more efficient
         self.hidden = 64
+        self.obs_dim = 5
+        self.act_dim = 2
+
         self.model = ActorCritic(hidden=self.hidden).to(self.device)
         self.last_jump_ms = 0
 
-        if ckpt_path and os.path.isfile(ckpt_path): #Check checkpoint path
+        if ckpt_path is None:  #Check checkpoint path
+            ckpt_path = os.path.join(os.path.dirname(__file__), "autopilot_policy.pt")
+
+        if ckpt_path and os.path.isfile(ckpt_path):
             self.load(ckpt_path)
         else:
             warnings.warn(f"[TorchPolicy] No checkpoint found at {ckpt_path} -> use random weights", RuntimeWarning)
@@ -80,16 +86,17 @@ class TorchPolicy:
         py = float(pr.centery) #Center y
 
         #Read vertical velocity
-        vy = float(getattr(player, "vel_y", getattr(player, "vy",0)))
-        vy_norm = np.clip(vy/800, -1.5,1.5) #Normalize it
+        vy = float(getattr(player, "vel_y", getattr(player, "vy",0.0)))
+        vy_norm = float(np.clip(vy/800.0, -1.5,1.5)) #Normalize it
 
         #Find next pipe
         next_pipe = None
         nearest_dx = 1e9
 
         for p in pipes:
-            dx = float(p.x + getattr(p, "width", 0)-px)
-            if dx >= -10 and dx < nearest_dx:
+            cx= float(p.x + getattr(p, "width", 0) *.5)
+            dx= cx-px
+            if dx >= -10.0 and dx < nearest_dx:
                 nearest_dx = dx
                 next_pipe = p
 
@@ -97,43 +104,43 @@ class TorchPolicy:
         if next_pipe is None:
             class Fake:
                 pass
-            next_pipe = Fake()
-            next_pipe.x = px+240
-            next_pipe.width = 120
-            fake_top= type("R", (), {"bottom":screen_h * .35})
-            fake_bottom = type("R", (), {"top":screen_h * .65})
+            fake = Fake()
+            fake.x = px +240.0
+            fake.width = 120
+
+            fake_top = type("R", (), {"bottom": screen_h*.35})
+            fake_bottom = type("R", (), {"top": screen_h*.65})
+
             def rects():
                 return fake_top, fake_bottom
-            next_pipe.rects = rects
+            fake.rects = rects
+            next_pipe = fake
 
         #Derive the gap center/height
         top_rect, bottom_rect = next_pipe.rects()
+
         gap_top= float(top_rect.bottom)
         gap_bot = float(bottom_rect.top)
         gap_h = max(1.0, gap_bot - gap_top)
-        gap_center_y= gap_top +.5*gap_h
+        gap_center_y= gap_top +.5* gap_h
 
-        #Time to gap normalized
+        #dx= player horizontal distance
+        #dx_to_gap_front = float(next_pipe.x-px)
+        #Try gap center
         try:
-            # Because i wanted my AI related .py files clearly separated in a different directory
-            BARRIERS_DIR = os.path.join(os.path.dirname(__file__), "..", "The Game Files")
-            if BARRIERS_DIR not in sys.path:
-                sys.path.insert(0, BARRIERS_DIR)
-
             from barriers import PIPE_SPEED
             pipe_speed = float(PIPE_SPEED)
-
         except Exception:
             pipe_speed = 4.0
 
-        #dx= player horizontal distance
-        dx_to_gap_front = float(next_pipe.x-px)
-        frames_to_gap = dx_to_gap_front / max(1e-6, pipe_speed)
-        t2g_norm = float(np.clip(frames_to_gap/60.0,-1.0,1.0))
+        cx= float(next_pipe.x + getattr(next_pipe, "width", 0)*.5)
+        dx_to_gap_center= cx-px
+        t2g = dx_to_gap_center / max(1.0, pipe_speed)
+        t2g_norm = float(np.clip(t2g/60.0,-1.0,1.0))
 
         #Vertical offset to gap center, normalize gap size
         gap_center_offset = float((gap_center_y - py)/ float(screen_h))
-        gap_h_norm= float(min(1,gap_h / float(screen_h)))
+        gap_h_norm= float(gap_h / int(screen_h))
 
         obs= np.array([py/float(screen_h), vy_norm, t2g_norm, gap_center_offset, gap_h_norm], dtype=np.float32)
 

@@ -26,6 +26,7 @@ class Player:
         #This will be the image that is actually displayed
         self.image: pygame.Surface = self.base_image.copy()
         self.rect: pygame.Rect = self.image.get_rect(center = (x, y))
+        self.mask: pygame.Mask = pygame.mask.from_surface(self.image, 32) #Mask image so collisions only happen on ship
 
         #Set up the physics for the game
         self.vel_y: float = 0.0
@@ -76,14 +77,20 @@ class Player:
         #Rotate based on the center
         self.image = pygame.transform.rotozoom(self.base_image, -self.tilt, 1.0)
         self.rect = self.image.get_rect(center = self.rect.center)
+        self.mask = pygame.mask.from_surface(self.image, 32)
 
         #Flame timer
         if self.flame_ms_left > 0:
             self.flame_ms_left = max(0, self.flame_ms_left - dt_ms)
 
     def get_rect(self) -> pygame.Rect:
+        cx, cy = self.rect.center
+        w, h = 60,40
+        left = int(cx - w/2)
+        top = int(cy - h/2)
+        return pygame.Rect(left, top, w, h)
         #Shrink player collision box without changing image size
-        return self.rect.inflate(-self.rect.width * .5, -self.rect.height * .6)
+        #return self.rect.inflate(-self.rect.width * .5, -self.rect.height * .6)
 
     def draw(self, surface: pygame.Surface) -> None:
         #Draw flame
@@ -106,6 +113,7 @@ class Player:
         self.tilt = 0.0
         self.image = self.base_image.copy()
         self.rect = self.image.get_rect(center = self.rect.center)
+        self.mask = pygame.mask.from_surface(self.image, 32)#rebuild mask
         self.flame_ms_left = 0
 
     #Flame Helper

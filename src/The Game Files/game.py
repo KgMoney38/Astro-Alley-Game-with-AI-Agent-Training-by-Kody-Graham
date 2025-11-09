@@ -10,7 +10,6 @@ import pygame
 from typing import List, Optional
 import os
 
-
 os.environ.setdefault("SDL_VIDEO_CENTERED", "1")
 from launch_video import play_video_cover, play_video_sequence_cover
 
@@ -162,7 +161,7 @@ class Game:
         self.selected_ship = os. path.join(assets, "ship.png")
         self.selected_bg = os.path.join(assets, "strip_background.png")
         self.selected_ob = os. path.join(assets, "obstacle.png")
-        self.policy_path = os.path.join(AI_DIR, "flappy_policy.pt")
+        self.policy_path = os.path.join(AI_DIR, "autopilot_policy.pt")
         self.autopilot=None
         self.customize = CustomizeMenu(self)
 
@@ -401,7 +400,7 @@ class Game:
             out_h= max(480, desktop_h-margin*2)
 
             #Position window
-            os.environ["SDL_VIDEO_WINDOW_POS"] = "{margin}, {margin}"
+            os.environ["SDL_VIDEO_WINDOW_POS"] = f"{margin}, {margin}"
 
             self.screen= pygame.display.set_mode((out_w, out_h), pygame.RESIZABLE)
             #self.canvas= pygame.Surface(self.virtual_size).convert()
@@ -455,15 +454,42 @@ class Game:
         self.pipes = [pipe for pipe in self.pipes if not pipe.off_screen()]
 
         #Track the collisions
-        bird_rect = self.player.get_rect()
+        ship_rect = self.player.get_rect() #Image rectangle
+        player_rect = self.player.rect
+        player_mask = getattr(self.player, "mask", None)
+
         for pipe in self.pipes:
             top_rect, bot_rect = pipe.rects()
-            if bird_rect.colliderect(top_rect) or bird_rect.colliderect(bot_rect):
+
+            #Fast reject
+            hit_top_aabb = player_rect.colliderect(top_rect)
+            hit_bot_aabb = player_rect.colliderect(bot_rect)
+            if not (hit_top_aabb or hit_bot_aabb):
+                continue
+
+            if player_mask is None:
                 self._on_game_over()
                 break
 
+            #Mask overlap vs the filled rectangle masks
+            if hit_top_aabb:
+                top_mask = pygame.Mask((top_rect.width, top_rect.height))
+                top_mask.fill()
+                offset = (top_rect.left- player_rect.left, top_rect.top- player_rect.top)
+                if player_mask.overlap(top_mask, offset):
+                    self._on_game_over()
+                    break
+
+            if hit_bot_aabb:
+                bot_mask = pygame.Mask((bot_rect.width, bot_rect.height))
+                bot_mask.fill()
+                offset = (bot_rect.left- player_rect.left, bot_rect.top- player_rect.top)
+                if player_mask.overlap(bot_mask, offset):
+                    self._on_game_over()
+                    break
+
         #Check top/bottom collision
-        if bird_rect.bottom > SCREEN_HEIGHT or bird_rect.top < 0:
+        if ship_rect.bottom > SCREEN_HEIGHT or ship_rect.top < 0:
             self._on_game_over()
 
         #Vertical error for my graph

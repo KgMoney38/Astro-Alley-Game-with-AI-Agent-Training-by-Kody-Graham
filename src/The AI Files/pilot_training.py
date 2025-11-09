@@ -15,7 +15,7 @@ from game_env import GameEnv
 
 #Model, network shared body: policy head and value head
 class ActorCritic(nn.Module):
-    def __init__(self, obs_dim=5, hidden=64, act_dim =2):
+    def __init__(self, obs_dim: int =5, hidden: int=64, act_dim: int =2):
         super().__init__() #Initialize nn module
         self.body = nn.Sequential( #Extract shared features
             nn.Linear(obs_dim, hidden), nn.Tanh(), #First linear layer maps the obs to hidden
@@ -25,7 +25,7 @@ class ActorCritic(nn.Module):
         self.v = nn.Linear(hidden, 1) #Value head
 
     #To pass forward through the network
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         h= self.body(x) #Shared features
         return self.pi(h), self.v(h)
 
@@ -33,16 +33,17 @@ class ActorCritic(nn.Module):
 def gae_return(rewards, vals, dones, gamma=.995, lam=.95):
 
     T = len(rewards) #Num time steps in rollout
-    adv= torch.zeros(T, dtype=torch.float32) #Buffer for advantages
-    lastgaelam = 0
+    adv= torch.zeros(T, dtype=torch.float32, device = vals.device) #Buffer for advantages
+    lastgaelam = 0.0
+
     for t in reversed(range(T)): #Work backwards
-        next_non_terminal = 1.0- float(dones[t])
-        next_value= 0 if t == T-1 else float(vals[t+1])
-        delta = float(rewards[t]) + gamma * next_value * next_non_terminal - float(vals[t]) #td resid
-        lastgaelam = delta +gamma * lam * next_non_terminal *lastgaelam
+        nextnonterminal= 1.0- float(dones[t])
+        nextvalue = 0.0 if t == T-1 else float(vals[t+1])
+        delta = float(rewards[t]) + gamma * nextvalue * nextnonterminal - float(vals[t]) #td resid
+        lastgaelam = delta +gamma * lam * nextnonterminal *lastgaelam
         adv[t]= lastgaelam
-    ret = adv+vals
-    return adv, ret
+    _return = adv+vals
+    return adv, _return
 
 #Mini batch generator with random shuffle
 def batchify(*arrays,bs):
@@ -51,7 +52,7 @@ def batchify(*arrays,bs):
     np.random.shuffle(idx)
     for start in range(0,n,bs):
         j = idx[start:start+bs]
-        yield (a[j] for a in arrays) #Yield aligned mini batches across input arrays
+        yield tuple(a[j] for a in arrays) #Yield aligned mini batches across input arrays
 
 #Main training loop
 def train():
@@ -66,7 +67,7 @@ def train():
     opt= optim.Adam(model.parameters(), lr=3e-4, eps=1e-5) #Adam optimizer
 
     #Defaults for my MLP
-    total_updates=200
+    total_updates=333
     steps_per_roll = 4096
     mini_batch_size = 512
     ppo_epochs = 4
@@ -76,16 +77,17 @@ def train():
     entropy_coef_end = .003
 
     best_avg_len= -1.0
+    best_avg_ret= -1.0
     save_path= os.path.join(os.path.dirname(__file__),"autopilot_policy.pt") #Save best checkpoint
 
     #PPO outer loop over updates
     for update in range(1,total_updates+1):
         #Cosine decay LR and entropy
         progress = (update-1)/max(1,total_updates-1)
-        lr_now = 3e-4*.5*(1+ math.cos(math.pi *progress))
+        lr_now = 3e-4*0.5*(1.0 + math.cos(math.pi * progress))
         for pg in opt.param_groups:
             pg["lr"] = lr_now #apply to ALL param groups
-        ent_coef = entropy_coef_end+ (entropy_coef_start-entropy_coef_end)*(1.0-progress) #Linear decay
+        ent_coef = entropy_coef_end + (entropy_coef_start-entropy_coef_end)*(1.0-progress) #Linear decay
 
         #Buffers
         obs_buf=[]
@@ -104,7 +106,7 @@ def train():
 
         with torch.no_grad():#On policy no gradients
             for _ in range(steps_per_roll):
-                x=torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0) #MAke batch
+                x = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0) #MAke batch
                 logits, value = model(x) #Pass forward
                 dist = Categorical(logits=logits) #Distribution over actions
                 action = dist.sample()
@@ -117,7 +119,7 @@ def train():
                 act_buf.append(int(action.item()))
                 logp_buf.append(float(logp.item()))
                 reward_buf.append(float(reward))
-                done_buf.append(float(done))
+                done_buf.append(float(1.0 if done else 0.0))
                 val_buf.append(float(value.item()))
 
                 ep_reward += float(reward)
@@ -132,17 +134,27 @@ def train():
                     ep_len = 0
                     obs, _ = env.reset()
 
+            #Bootstrap val for final state of rollout
+            #if len(done_buf)> 0 and done_buf[-1] == 0.0:
+            #    x_last = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
+            #    _, last_val_t = model(x_last)
+            #    last_val = float(last_val_t.item())
+            #else:
+             #   last_val=0.0
+
+
+
         #Convert buffers to tensor on device
-        obs_t=torch.tensor(np.array(obs_buf), dtype=torch.float32, device=device)
-        act_t=torch.tensor(np.array(act_buf), dtype=torch.int64, device=device)
-        old_logp_t=torch.tensor(np.array(logp_buf), dtype=torch.float32, device=device)
-        reward_t=torch.tensor(np.array(reward_buf), dtype=torch.float32, device=device)
-        done_t=torch.tensor(np.array(done_buf), dtype=torch.float32, device=device)
-        val_t=torch.tensor(np.array(val_buf), dtype=torch.float32, device=device)
+        obs_t = torch.tensor(np.array(obs_buf), dtype=torch.float32, device=device)
+        act_t =torch.tensor(np.array(act_buf), dtype=torch.int64, device=device)
+        old_logp_t= torch.tensor(np.array(logp_buf), dtype=torch.float32, device=device)
+        reward_t= torch.tensor(np.array(reward_buf), dtype=torch.float32, device=device)
+        done_t= torch.tensor(np.array(done_buf), dtype=torch.float32, device=device)
+        val_t =torch.tensor(np.array(val_buf), dtype=torch.float32, device=device)
 
         #Compute GAE returns and advantages
         adv_t, ret_t = gae_return(reward_t, val_t, done_t, gamma=.995, lam=.95)
-        adv_t = (adv_t- adv_t.mean())/ (adv_t.std() + 1e-8)
+        adv_t = (adv_t- adv_t.mean()) / (adv_t.std() + 1e-8)
 
         #Update PPO
         for _ in range(ppo_epochs):
@@ -151,7 +163,7 @@ def train():
                 logits, value = model(b_obs) #Forward
                 dist = Categorical(logits=logits)
                 logp = dist.log_prob(b_act)
-                enthropy = dist.entropy().mean()
+                entropy = dist.entropy().mean()
 
                 ratio = torch.exp(logp - b_old_logp)
                 pg_loss1= ratio*b_adv
@@ -159,7 +171,7 @@ def train():
                 pg_loss = -torch.min(pg_loss1, pg_loss2).mean()
 
                 v_loss = .5* (b_ret-value.squeeze(-1)).pow(2).mean()
-                loss = pg_loss + vf_coef*v_loss- ent_coef*enthropy
+                loss = pg_loss + vf_coef*v_loss- ent_coef*entropy
 
                 opt.zero_grad()
                 loss.backward()
@@ -174,12 +186,15 @@ def train():
         if avg_len > best_avg_len:
             best_avg_len = avg_len
             torch.save(model.state_dict(), save_path)
+        if avg_ret > best_avg_ret:
+            best_avg_ret = avg_ret
 
-    #Final save
     if not os.path.isfile(save_path):
         torch.save(model.state_dict(), save_path)
-        print(f"Highest avg length: {best_avg_len:+.2f}", f"\nHighest avg return: {avg_ret:+.2f}")
-        print("Saved:", save_path)
+
+    #Final
+    print(f"Highest avg length: {best_avg_len:+.2f}", f"\nHighest avg return: {best_avg_ret:+.2f}")
+    print("Saved:", save_path)
 
 #Run it
 if __name__ == "__main__":

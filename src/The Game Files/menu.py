@@ -276,7 +276,6 @@ class CustomizeMenu:
         else:
             self.game.start_user_game()
 
-        self.game.reset()
         self.game.state = "play"
 
     #Redraw my layout if window size is adjusted
