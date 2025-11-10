@@ -6,6 +6,9 @@
 
 import pygame
 import os
+
+from PIL.ImageChops import offset
+
 from launch_video import play_video_cover #For my customize launch video
 
 
@@ -154,9 +157,16 @@ class CustomizeMenu:
         self.bg_files = ["strip_background.png", "strip_background1.png", "strip_background2.png"]
         self.ob_files = ["obstacle.png", "obstacle1.png", "obstacle2.png"]
 
+        #For my scrollable menu
+        self.ships_files= self.collect_varients("ship", 9)
+        self.bg_files = self.collect_varients("strip_background", 9)
+        self.ob_files = self.collect_varients("obstacle", 9)
+
         bg_path = asset_path("customize_bg.png")
         self.customize_bg = pygame.image.load(bg_path).convert() if os.path.exists(bg_path) else None
         self.customize_overlay = None
+
+        #Build thumbnails:
 
         #Cropped ships
         self.ships = [(name, self._load(asset_path(name),(200,100), alpha=True)) for name in self.ship_files if os.path.exists(asset_path(name))]
@@ -172,9 +182,25 @@ class CustomizeMenu:
         self.ob_idx = self._index_from_name(self.obs, os.path.basename(game.selected_ob))
 
         w, h = game.screen.get_size()
-        self.ship_rects = self._row_rects_centered(count = len(self.ships), box_w=210, box_h=110, y=130, gap=28, screen_w=w)
-        self.bg_rects = self._row_rects_centered(count=len(self.bgs), box_w=300, box_h=170, y=300, gap=28, screen_w=w)
-        self.ob_rects = self._row_rects_centered(count=len(self.obs), box_w=110, box_h=250, y=528, gap=55, screen_w=w)
+
+        self.ship_rects = self._row_rects_centered(count = 3, box_w=210, box_h=110, y=130, gap=28, screen_w=w)
+        self.bg_rects = self._row_rects_centered(count=3, box_w=300, box_h=170, y=300, gap=28, screen_w=w)
+        self.ob_rects = self._row_rects_centered(count=3, box_w=110, box_h=250, y=528, gap=55, screen_w=w)
+
+        #Next/pre arrows
+        self.arrow_left_img = None
+        self.arrow_right_img = None
+        try:
+            self.arrow_left_img = self._load(asset_path("arrow_left.png"), (100,50), alpha=True)
+            self.arrow_right_img = self._load(asset_path("arrow_right.png"), (100,50), alpha=True)
+        except Exception as e:
+            print("Failed to load arrow", e)
+
+        self.ship_left_arrow, self.ship_right_arrow = self.arrow_rects_for_row(self.ship_rects)
+        self.bg_left_arrow, self.bg_right_arrow = self.arrow_rects_for_row(self.bg_rects)
+        self.ob_left_arrow, self.ob_right_arrow = self.arrow_rects_for_row(self.ob_rects)
+
+        self.position_arrows(w)
 
         #Music toggle
         self.music_toggle = IconToggle(center=(98,670), image_on_path=asset_path("music_on.png"), image_off_path=asset_path("music_off.png"),get_state=lambda: not game._music_paused, on_toggle= game.toggle_music, size=58)
@@ -184,6 +210,18 @@ class CustomizeMenu:
         self.btn_start = Button("Launch!", pygame.Rect(w-210, h-70, 180, 50), self.font, self._save_and_start)
 
         self.last_side=game.screen.get_size()
+
+    #Collect images into list
+    def collect_varients(self, base_name: str, max_index: int) -> list[str]:
+
+        files: list[str] = []
+        for i in range(max_index+1):
+            suffix = "" if i == 0 else str(i)
+            fname = f"{base_name}{suffix}.png"
+            if os.path.exists(asset_path(fname)):
+                files.append(fname)
+
+        return files
 
     #Label for whether AI is enabled or not
     def draw_copilot_label(self, surface: pygame.Surface) -> None:
@@ -254,6 +292,17 @@ class CustomizeMenu:
             x += box_w + gap
         return rects
 
+    def arrow_rects_for_row(self,rects, size= 100, gap=16):
+        if not rects:
+            return None, None
+        left_box= rects[0]
+        right_box= rects[-1]
+        cy = left_box.centery
+        left = pygame.Rect(left_box.left- gap-size-10, cy-size+15 // 2,size, size)
+        right = pygame.Rect(right_box.left+gap, cy-size+15 // 2,size, size)
+
+        return left, right
+
     #Self explanatory
     def _save_and_start(self):
 
@@ -282,18 +331,76 @@ class CustomizeMenu:
     def relayout(self,surface:pygame.Surface) -> None:
         if surface.get_size() != self.last_side:
             w,h = surface.get_size()
-            self.ship_rects = self._row_rects_centered(count= len(self.ships), box_w=210, box_h=110, y=130, gap=28, screen_w=w)
-            self.bg_rects = self._row_rects_centered(count= len(self.bgs), box_w=300, box_h=170, y=300, gap=28, screen_w=w)
-            self.ob_rects = self._row_rects_centered(count= len(self.obs), box_w=110, box_h=250, y=528, gap=55, screen_w=w)
+            self.ship_rects = self._row_rects_centered(count= 3, box_w=210, box_h=110, y=130, gap=28, screen_w=w)
+            self.bg_rects = self._row_rects_centered(count= 3, box_w=300, box_h=170, y=300, gap=28, screen_w=w)
+            self.ob_rects = self._row_rects_centered(count= 3, box_w=110, box_h=250, y=528, gap=55, screen_w=w)
 
             self.btn_back.rect.topleft=(30,h-70)
             self.btn_start.rect.topright=(w-30,h-70)
+
+            self.position_arrows(w)
+
             self.last_side= (w,h)
+
+    # Draw arrows relative to boxes
+    def position_arrows(self, screen_w: int) -> None:
+        padding = 25
+
+        if self.ship_rects:
+            row_y = self.ship_rects[0].centery
+            self.ship_left_arrow.midright = (self.ship_rects[0].left - padding, row_y+25)
+            self.ship_right_arrow.midleft = (self.ship_rects[-1].right + padding, row_y+25)
+
+        if self.bg_rects:
+            row_y = self.bg_rects[0].centery
+            self.bg_left_arrow.midright = (self.bg_rects[0].left - padding, row_y+15)
+            self.bg_right_arrow.midleft = (self.bg_rects[-1].right + padding, row_y+15)
+
+        if self.ob_rects:
+            row_y = self.ob_rects[0].centery
+            self.ob_left_arrow.midright = (self.ob_rects[0].left - padding, row_y+5)
+            self.ob_right_arrow.midleft = (self.ob_rects[-1].right + padding, row_y+5)
 
     #Basic listener
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             pos = event.pos
+
+            #Infinite scroll:
+
+            #Ship rows
+            if self.ships:
+                if self.ship_left_arrow and self.ship_right_arrow.collidepoint(pos):
+                    self.ship_idx = (self.ship_idx-1) % len(self.ships)
+                elif self.ship_right_arrow and self.ship_left_arrow.collidepoint(pos):
+                    self.ship_idx = (self.ship_idx+1) % len(self.ships)
+                elif len(self.ship_rects) >= 3 and self.ship_rects[0].collidepoint(pos):
+                    self.ship_idx = (self.ship_idx-1) % len(self.ships)
+                elif len(self.ship_rects) >= 3 and self.ship_rects[2].collidepoint(pos):
+                    self.ship_idx = (self.ship_idx+1) % len(self.ships)
+
+            #BG rows
+            if self.bgs:
+                if self.bg_left_arrow and self.bg_left_arrow.collidepoint(pos):
+                    self.bg_idx = (self.bg_idx-1) % len(self.bgs)
+                elif self.bg_right_arrow and self.bg_right_arrow.collidepoint(pos):
+                    self.bg_idx = (self.bg_idx+1) % len(self.bgs)
+                elif len(self.bg_rects)>= 3 and self.bg_rects[0].collidepoint(pos):
+                    self.bg_idx = (self.bg_idx-1) % len(self.bgs)
+                elif len(self.bg_rects) >= 3 and self.bg_rects[2].collidepoint(pos):
+                    self.bg_idx = (self.bg_idx+1) % len(self.bgs)
+
+            #Obs rows
+            if self.obs:
+                if self.ob_left_arrow and self.ob_left_arrow.collidepoint(pos):
+                    self.ob_idx = (self.ob_idx-1) % len(self.obs)
+                elif self.ob_right_arrow and self.ob_right_arrow.collidepoint(pos):
+                    self.ob_idx = (self.ob_idx+1) % len(self.obs)
+                elif len(self.ob_rects)>= 3 and self.ob_rects[0].collidepoint(pos):
+                    self.ob_idx = (self.ob_idx-1) % len(self.obs)
+                elif len(self.ob_rects) >= 3 and self.ob_rects[2].collidepoint(pos):
+                    self.ob_idx = (self.ob_idx+1) % len(self.obs)
+
             for i, r in enumerate(self.ship_rects):
                 if i < len(self.ships) and r.collidepoint(pos): self.ship_idx = i
             for i, b in enumerate(self.bg_rects):
@@ -310,12 +417,40 @@ class CustomizeMenu:
 
     #Draw the rows and border
     def _draw_row(self, surface, items, rects, sel_idx):
-        for i, r in enumerate(rects):
-            if i >= len(items):
-                break
-            _, img = items[i]
-            surface.blit(img, img.get_rect(center=r.center))
-            self._outline(surface, r, (0,0,255) if i == sel_idx else (50,50,50), 3, 10)
+
+        if not items or not rects:
+            return
+
+        n = len(items)
+
+        if len(rects) == 1:
+            offsets= [0]
+        elif len(rects) == 2:
+            offsets= [-1,0]
+        else: offsets= [-1,0,1]
+
+        for rect, off in zip(rects, offsets):
+            idx = (sel_idx + off) % n
+            _, img = items[idx]
+            surface.blit(img, img.get_rect(center=rect.center))
+            color = (0,0, 255) if off == 0 else (50,50,50)
+            self._outline(surface, rect, color, 3, 10)
+
+    def draw_arrows(self,surface: pygame.Surface) -> None:
+        if not (self.arrow_left_img and self.arrow_right_img):
+            return
+
+        if self.ships:
+            surface.blit(self.arrow_left_img, self.ship_left_arrow)
+            surface.blit(self.arrow_right_img, self.ship_right_arrow)
+
+        if self.bgs:
+            surface.blit(self.arrow_left_img, self.bg_left_arrow)
+            surface.blit(self.arrow_right_img, self.bg_right_arrow)
+
+        if self.obs:
+            surface.blit(self.arrow_left_img, self.ob_left_arrow)
+            surface.blit(self.arrow_right_img, self.ob_right_arrow)
 
     #Draw rest of my customization menu
     def draw(self, surface:pygame.Surface) -> None:
@@ -354,6 +489,8 @@ class CustomizeMenu:
         self._draw_row(surface, self.ships, self.ship_rects, self.ship_idx)
         self._draw_row(surface, self.bgs, self.bg_rects, self.bg_idx)
         self._draw_row(surface, self.obs, self.ob_rects, self.ob_idx)
+
+        self.draw_arrows(surface)
 
         self.music_toggle.draw(surface)
         self.btn_back.draw(surface)

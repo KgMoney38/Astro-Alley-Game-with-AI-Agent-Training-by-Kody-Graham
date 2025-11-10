@@ -21,6 +21,11 @@ if GAME_FILE_DIR not in sys.path:
     sys.path.insert(0,GAME_FILE_DIR)
 from barriers import SCREEN_HEIGHT, PIPE_GAP, PIPE_WIDTH, PIPE_SPEED, PIPE_MIN_TOP, PIPE_MAX_TOP
 
+#Aligned with player_icon.py
+PLAYER_W=120.0
+PLAYER_H=60.0
+PLAYER_HALF_H = PLAYER_H * .5
+
 #Simple pipe representation for training env
 @dataclass
 class _Pipe: # "_" because i used Pipe in my barriers class, keep them distinct
@@ -43,6 +48,7 @@ class GameEnv:
             jump_impulse: float=-10.0,
             terminate_on_impact: bool = True,
             max_steps: int = 5000,
+
 
             #Rewards
             pass_reward: float= 8.0,
@@ -138,9 +144,13 @@ class GameEnv:
 
         #Collision Detection
         #Wall
-        hit_top = self.py<0
-        hit_bottom = self.py> self.height
-        if (hit_top or hit_bottom) and self.terminate_on_impact:
+        top = self.py - PLAYER_HALF_H
+        bottom = self.py + PLAYER_HALF_H
+
+        hit_top = top < 0.0
+        hit_bottom = bottom > float(self.height)
+
+        if( hit_top or hit_bottom) and self.terminate_on_impact:
             terminated = True
             reward += self.crash_penalty
 
@@ -168,8 +178,8 @@ class GameEnv:
                 cy = next_p.gap_y
                 half_gap = .5 * max(1.0,float(next_p.gap_h))
                 dy_norm = abs(self.py - cy)/ half_gap
-                closeness = 1.0 - min(1.0, float(next_p.gap_h))
-                w= math.exp(-dx/(self.shaping_scale * .9))
+                closeness = 1.0 - min(1.0, float(dy_norm))
+                w= math.exp(-dx/self.shaping_max_dx)
                 reward += self.shaping_scale * w * closeness
 
         #Small survival reward and small penalty to discourage spam jumping
@@ -189,7 +199,8 @@ class GameEnv:
     #Helpers
     def rand_gap(self) -> tuple[float,int]:
 
-        gh= int(self.gap)
+        gh= int(self.gap) #Slightly tighter than real game for better training
+
         #Keep the gap all the way in the screen
         max_top =max(50, self.height-gh-50)
         top_hi = min(PIPE_MAX_TOP, max_top)
@@ -202,10 +213,11 @@ class GameEnv:
         #Pipe center from the smallest positive dx from my ship
         best= None
         best_dx= math.inf #Smallest positive dx
+        player_left =self.px- PLAYER_W * .5
 
         for pipe in self.pipes:
-            cx = pipe.x + .5 * pipe.width
-            dx = cx-self.px
+            pipe_right = pipe.x + pipe.width
+            dx = pipe_right - player_left
 
             #Need the closest non passed pipe
             if dx >= -1e-6 and dx < best_dx:
@@ -219,7 +231,7 @@ class GameEnv:
         collided = False
         passed = False
 
-        player_w, player_h= 60, 40 #Same as my actually player icon for consistent training and real game parameters
+        player_w, player_h= PLAYER_W, PLAYER_H #Same as my actually player icon for consistent training and real game parameters
                                     #For tighter fit i increased size player size here for training but left it the same in player_icon
         px1 = self.px - player_w*.5
         py1 = self.py - player_h*.5
@@ -238,8 +250,8 @@ class GameEnv:
                 collided = True
                 
             #Pass center check
-            cx = pipe.x +.5 * pipe.width
-            if cx < self.px <= cx + self.pipe_speed:
+            pipe_right = pipe.x + pipe.width
+            if pipe_right < self.px <= pipe_right + self.pipe_speed:
                 passed = True
         
         return collided, passed

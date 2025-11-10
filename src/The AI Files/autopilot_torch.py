@@ -79,7 +79,7 @@ class TorchPolicy:
 
     def next_pipe(self, player,pipes):
         prect= self.player_rect(player)  #Player rectangle
-        px = float(prect.centerx) #player center
+        player_left = float(prect.left) #player center
 
         best = None
         best_dx = float("inf")
@@ -87,8 +87,8 @@ class TorchPolicy:
             if not hasattr(p, "rects"):
                 continue
             top_rect, bot_rect = p.rects()
-            cx = float(p.x) + .5 * float(p.width)
-            dx = cx-px
+            pipe_right = float(p.x) + float(p.width)
+            dx = pipe_right-player_left
 
             #Choose nearest pipe not behind
             if dx >= -1e-6 and dx < best_dx:

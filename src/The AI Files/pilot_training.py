@@ -131,7 +131,8 @@ def train():
     best_eval_pipes = -1.0 #Track best eval
     save_path= os.path.join(os.path.dirname(__file__),"autopilot_policy.pt") #Save best model
 
-    print("Stop the program at anytime and the current policy will be saved and training will end.")
+    print("#$#$#$# Stop the program at anytime and the current policy will be saved and training will end. #$#$#$#")
+    print("#$#$#$# Note: Each update = 100 Episodes. #$#$#$#")
 
     try:
         # PPO outer loop over updates
@@ -262,7 +263,7 @@ def train():
 
             #Display statistics per update and per 10 updates
             if update % 10==0:
-                eval_len, eval_pipes = evaluate_policy(model, device, episodes=25)
+                eval_len, eval_pipes = evaluate_policy(model, device, episodes=100) #Episodes is per update
                 if eval_pipes > best_eval_pipes: #If new best agent
                     best_eval_pipes = eval_pipes
                     torch.save(model.state_dict(), save_path) #Save weights

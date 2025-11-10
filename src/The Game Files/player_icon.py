@@ -84,11 +84,8 @@ class Player:
             self.flame_ms_left = max(0, self.flame_ms_left - dt_ms)
 
     def get_rect(self) -> pygame.Rect:
-        cx, cy = self.rect.center
-        w, h = 60,40
-        left = int(cx - w/2)
-        top = int(cy - h/2)
-        return pygame.Rect(left, top, w, h)
+        #Use actual ship as collision box
+        return self.rect
         #Shrink player collision box without changing image size
         #return self.rect.inflate(-self.rect.width * .5, -self.rect.height * .6)
 
