@@ -37,6 +37,7 @@ WINDOWED_FLAGS= pygame.RESIZABLE|pygame.DOUBLEBUF
 SCREEN_WIDTH = 1000
 FPS = 60
 SPAWN_MS = 1500
+SPAWN_FRAMES = int(SPAWN_MS/ (1000/FPS))
 BIRD_START_X = 100
 STRIP_PATH = "../The Game Files/assets/strip_background.png"
 scroll_speed= 4
@@ -175,7 +176,7 @@ class Game:
         self.all_time_high_score = load_high_score()
         self.rounds_played = 0
         self.game_over = False
-        self._spawn_ms = 0
+        self._spawn_frames = 0
         self.running = True
 
         self.snd_jump = pygame.mixer.Sound(sound_path("jump.wav"))
@@ -222,21 +223,21 @@ class Game:
     #Reset
     def reset(self) -> None:
        ship_name = os.path.basename(self.selected_ship)
-       self.player = Player(x=BIRD_START_X, y= int(SCREEN_HEIGHT-SCREEN_HEIGHT/2), image_name=ship_name, size=(99,33))
+       self.player = Player(x=BIRD_START_X, y= SCREEN_HEIGHT//2, image_name=ship_name, size=(99,33))
 
        self.bg_image = pygame.image.load(self.selected_bg).convert()
        self.bg_x = 0
 
        ob_name = os.path.basename(self.selected_ob)
 
-       spacing_px = int(PIPE_SPEED *(SPAWN_MS / 1000.0) * FPS)
-       initial_x = SCREEN_WIDTH/2 + spacing_px
+       #spacing_px = int(PIPE_SPEED *(SPAWN_MS / 1000.0) * FPS)
+       #initial_x = SCREEN_WIDTH/2 + spacing_px
 
-       self.pipes: List[Pipe] = [Pipe.spawn(int(initial_x), SCREEN_HEIGHT, image_name=ob_name)]
+       self.pipes: List[Pipe] = [Pipe.spawn(SCREEN_WIDTH, SCREEN_HEIGHT, image_name=ob_name)]
 
        self.score = 0
        self.game_over = False
-       self._spawn_ms = 0
+       self._spawn_frames = 0
        self.player.flame_ms_left = 0
        self.ai_restart_timer=None
 
@@ -434,24 +435,31 @@ class Game:
 
         #Increment the timer
         self.player.update(dt_ms)
-        self._spawn_ms += dt_ms
-
-
-        #New pipes spawn based on timer
-        if self._spawn_ms >= SPAWN_MS:
-            ob_name = os.path.basename(self.selected_ob)
-            self.pipes.append(Pipe.spawn(SCREEN_WIDTH, SCREEN_HEIGHT, image_name=ob_name))
-            self._spawn_ms = 0
 
         #Move the pipes and keep the score
         for pipe in self.pipes:
             pipe.update()
+
+        new_pipes:List[Pipe] = []
+        for pipe in self.pipes:
             if not pipe.passed and (pipe.x + pipe.width < BIRD_START_X):
                 pipe.passed = True
                 self.score += 1
 
+            if not pipe.off_screen():
+                new_pipes.append(pipe)
+
+        self.pipes = new_pipes
+
+        # New pipes spawn based on timer
+        self._spawn_frames += 1
+        if self._spawn_frames >= SPAWN_FRAMES:
+            ob_name = os.path.basename(self.selected_ob)
+            self.pipes.append(Pipe.spawn(SCREEN_WIDTH, SCREEN_HEIGHT, image_name=ob_name))
+            self._spawn_frames = 0
+
         #Delete when off the screen
-        self.pipes = [pipe for pipe in self.pipes if not pipe.off_screen()]
+        #self.pipes = [pipe for pipe in self.pipes if not pipe.off_screen()]
 
         #Track the collisions
         ship_rect = self.player.get_rect() #Image rectangle
