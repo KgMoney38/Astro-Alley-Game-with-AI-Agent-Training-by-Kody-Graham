@@ -271,7 +271,7 @@ def train():
                     torch.save(best_state_dict, save_path) #Save best so far
 
                 print(f"Update {update:05d} | train_length = {avg_len:6.1f} | train_return = {avg_ret:+.2f} "
-                      f"| ent = {ent_coef:.4f} | learning_rate_now = {learning_rate_now:.6f}"
+                      f"| ent = {ent_coef:.4f} | learning_rate_now = {learning_rate_now:.6f} "
                       f"| eval_length = {eval_len:6.1f} | eval_pipes = {eval_pipes:5.2f} ")
             else:
                 print(f"Update {update:05d} | train_length = {avg_len:6.1f} | train_return = {avg_ret:+.2f} "
