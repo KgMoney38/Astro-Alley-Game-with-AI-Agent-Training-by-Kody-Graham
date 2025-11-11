@@ -22,8 +22,8 @@ if GAME_FILE_DIR not in sys.path:
 from barriers import SCREEN_HEIGHT, PIPE_GAP, PIPE_WIDTH, PIPE_SPEED, PIPE_MIN_TOP, PIPE_MAX_TOP
 
 #Aligned with player_icon.py
-PLAYER_W=120.0
-PLAYER_H=60.0
+PLAYER_W=99
+PLAYER_H=33
 PLAYER_HALF_H = PLAYER_H * .5
 
 #Simple pipe representation for training env

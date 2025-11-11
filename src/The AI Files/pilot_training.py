@@ -6,7 +6,7 @@
 #Note for self: Done
 
 from __future__ import annotations
-import os, math
+import os, math, copy
 import numpy as np
 import torch
 import torch.nn as nn
@@ -130,6 +130,7 @@ def train():
 
     best_eval_pipes = -1.0 #Track best eval
     save_path= os.path.join(os.path.dirname(__file__),"autopilot_policy.pt") #Save best model
+    best_state_dict = None #Keep track best model
 
     print("#$#$#$# Stop the program at anytime and the current policy will be saved and training will end. #$#$#$#")
     print("#$#$#$# Note: Each update = 100 Episodes. #$#$#$#")
@@ -266,24 +267,31 @@ def train():
                 eval_len, eval_pipes = evaluate_policy(model, device, episodes=100) #Episodes is per update
                 if eval_pipes > best_eval_pipes: #If new best agent
                     best_eval_pipes = eval_pipes
-                    torch.save(model.state_dict(), save_path) #Save weights
+                    best_state_dict = copy.deepcopy(model.state_dict()) #Copy best parameters
+                    torch.save(best_state_dict, save_path) #Save best so far
 
                 print(f"Update {update:05d} | train_length = {avg_len:6.1f} | train_return = {avg_ret:+.2f} "
-                      f"| eval_length = {eval_len:6.1f} | eval_pipes = {eval_pipes:5.2f} "
-                      f"| learning_rate_now = {learning_rate_now:.6f} ent = {ent_coef:.4f}")
+                      f"| ent = {ent_coef:.4f} | learning_rate_now = {learning_rate_now:.6f}"
+                      f"| eval_length = {eval_len:6.1f} | eval_pipes = {eval_pipes:5.2f} ")
             else:
                 print(f"Update {update:05d} | train_length = {avg_len:6.1f} | train_return = {avg_ret:+.2f} "
-                        f"| ent = {ent_coef:.4f} | learning_rate_now = {learning_rate_now:.6f} ")
+                      f"| ent = {ent_coef:.4f} | learning_rate_now = {learning_rate_now:.6f} ")
 
     #Quick escape
     except KeyboardInterrupt:
-        print("\nKeyboardInterrupt recievied. Saving the current model...")
-        torch.save(model.state_dict(), save_path) #Save current weights
-        print("Training Saved:", save_path)
+        print("\nKeyboardInterrupt received. Saving the best model so far...")
+        if best_state_dict is not None: #Pick best model if we have one
+            torch.save(best_state_dict, save_path) #Save best weights
+            print("Best model (by eval_pipes) saved: ", save_path)
+        else:
+            torch.save(model.state_dict(), save_path)
+            print("No eval yet, current model saved: ", save_path)
         return
 
-    if not os.path.isfile(save_path):
-        torch.save(model.state_dict(), save_path)
+    if not os.path.isfile(save_path): #Make sure something is saved
+        to_save = best_state_dict if best_state_dict is not None else model.state_dict()
+        torch.save(to_save, save_path)
+        print("$#$#$#$ Check Save! $#$#$#$")
 
     #Final
     print("Final best_eval_pipes:", best_eval_pipes)

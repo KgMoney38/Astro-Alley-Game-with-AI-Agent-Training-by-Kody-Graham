@@ -153,9 +153,9 @@ class CustomizeMenu:
         self.font = game.font
         self.copilot_font= pygame.font.SysFont(None, 33)
         self.copilot_rect = pygame.Rect(0, 0, 0, 0)
-        self.ship_files = ["ship.png", "ship1.png", "ship2.png"]
-        self.bg_files = ["strip_background.png", "strip_background1.png", "strip_background2.png"]
-        self.ob_files = ["obstacle.png", "obstacle1.png", "obstacle2.png"]
+        self.ship_files = ["ship.png", "ship1.png", "ship2.png", "ship3.png", "ship4.png", "ship5.png", "ship6.png", "ship7.png", "ship8.png", "ship9.png"]
+        self.bg_files = ["strip_background.png", "strip_background1.png", "strip_background2.png", "strip_background3.png", "strip_background4.png", "strip_background5.png", "strip_background6.png", "strip_background7.png", "strip_background8.png", "strip_background9.png"]
+        self.ob_files = ["obstacle.png", "obstacle1.png", "obstacle2.png" , "obstacle3.png", "obstacle4.png", "obstacle5.png", "obstacle6.png", "obstacle7.png", "obstacle8.png", "obstacle9.png"]
 
         #For my scrollable menu
         self.ships_files= self.collect_varients("ship", 9)
@@ -169,7 +169,7 @@ class CustomizeMenu:
         #Build thumbnails:
 
         #Cropped ships
-        self.ships = [(name, self._load(asset_path(name),(200,100), alpha=True)) for name in self.ship_files if os.path.exists(asset_path(name))]
+        self.ships = [(name, self._load(asset_path(name),(200,69), alpha=True)) for name in self.ship_files if os.path.exists(asset_path(name))]
 
         #Backgrounds cropped
         self.bgs = [(name, self._bg_preview(asset_path(name), crop_w=900, crop_h=800, thumb=(300,160))) for name in self.bg_files if os.path.exists(asset_path(name))]
@@ -371,13 +371,13 @@ class CustomizeMenu:
             #Ship rows
             if self.ships:
                 if self.ship_left_arrow and self.ship_right_arrow.collidepoint(pos):
-                    self.ship_idx = (self.ship_idx-1) % len(self.ships)
+                    self.ship_idx = (self.ship_idx+1) % len(self.ships)
                 elif self.ship_right_arrow and self.ship_left_arrow.collidepoint(pos):
-                    self.ship_idx = (self.ship_idx+1) % len(self.ships)
-                elif len(self.ship_rects) >= 3 and self.ship_rects[0].collidepoint(pos):
                     self.ship_idx = (self.ship_idx-1) % len(self.ships)
-                elif len(self.ship_rects) >= 3 and self.ship_rects[2].collidepoint(pos):
+                elif len(self.ship_rects) >= 3 and self.ship_rects[0].collidepoint(pos):
                     self.ship_idx = (self.ship_idx+1) % len(self.ships)
+                elif len(self.ship_rects) >= 3 and self.ship_rects[2].collidepoint(pos):
+                    self.ship_idx = (self.ship_idx-1) % len(self.ships)
 
             #BG rows
             if self.bgs:
@@ -386,9 +386,9 @@ class CustomizeMenu:
                 elif self.bg_right_arrow and self.bg_right_arrow.collidepoint(pos):
                     self.bg_idx = (self.bg_idx+1) % len(self.bgs)
                 elif len(self.bg_rects)>= 3 and self.bg_rects[0].collidepoint(pos):
-                    self.bg_idx = (self.bg_idx-1) % len(self.bgs)
-                elif len(self.bg_rects) >= 3 and self.bg_rects[2].collidepoint(pos):
                     self.bg_idx = (self.bg_idx+1) % len(self.bgs)
+                elif len(self.bg_rects) >= 3 and self.bg_rects[2].collidepoint(pos):
+                    self.bg_idx = (self.bg_idx-1) % len(self.bgs)
 
             #Obs rows
             if self.obs:
@@ -397,9 +397,9 @@ class CustomizeMenu:
                 elif self.ob_right_arrow and self.ob_right_arrow.collidepoint(pos):
                     self.ob_idx = (self.ob_idx+1) % len(self.obs)
                 elif len(self.ob_rects)>= 3 and self.ob_rects[0].collidepoint(pos):
-                    self.ob_idx = (self.ob_idx-1) % len(self.obs)
-                elif len(self.ob_rects) >= 3 and self.ob_rects[2].collidepoint(pos):
                     self.ob_idx = (self.ob_idx+1) % len(self.obs)
+                elif len(self.ob_rects) >= 3 and self.ob_rects[2].collidepoint(pos):
+                    self.ob_idx = (self.ob_idx-1) % len(self.obs)
 
             for i, r in enumerate(self.ship_rects):
                 if i < len(self.ships) and r.collidepoint(pos): self.ship_idx = i

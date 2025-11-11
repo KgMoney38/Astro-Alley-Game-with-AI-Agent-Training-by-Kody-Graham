@@ -67,20 +67,18 @@ class Pipe:
     def off_screen(self) -> bool:
         return self.x + self.width < 0
 
-    def rects(self) -> Tuple[pygame.Rect, pygame.Rect]:
-
-        trim_x=4
+    def rects(self) -> tuple[pygame.Rect, pygame.Rect]:
 
         ix = self.HITBOX_INSET_X
+        top_width = max(1,self.width-2 *ix)
 
-        top_width = max(1, self.width-2*ix)
         top_height = max(1, self.top_height- self.TOP_TRIM_BOTTOM)
-        top_rect = pygame.Rect(int(self.x) + trim_x, 0, self.width, self.top_height-10)
+        bottom_height = max(1, self.bottom_height - self.BOTTOM_TRIM_TOP)
+
+        top_rect = pygame.Rect(int(self.x) + ix, 0, top_width, top_height)
 
         bottom_y = self.top_height + self.gap
-        bottom_x = int(self.x)+ ix
-        bottom_height = max(1, self.bottom_height - self.BOTTOM_TRIM_TOP)
-        bottom_rect = pygame.Rect(bottom_x, bottom_y +self.BOTTOM_TRIM_TOP, top_width, bottom_height,)
+        bottom_rect = pygame.Rect(int(self.x)+ ix, bottom_y +self.BOTTOM_TRIM_TOP, top_width, bottom_height,)
 
 
         return top_rect, bottom_rect

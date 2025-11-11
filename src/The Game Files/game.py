@@ -222,7 +222,7 @@ class Game:
     #Reset
     def reset(self) -> None:
        ship_name = os.path.basename(self.selected_ship)
-       self.player = Player(x=BIRD_START_X, y= int(SCREEN_HEIGHT-SCREEN_HEIGHT/2), image_name=ship_name, size=(120,60))
+       self.player = Player(x=BIRD_START_X, y= int(SCREEN_HEIGHT-SCREEN_HEIGHT/2), image_name=ship_name, size=(99,33))
 
        self.bg_image = pygame.image.load(self.selected_bg).convert()
        self.bg_x = 0

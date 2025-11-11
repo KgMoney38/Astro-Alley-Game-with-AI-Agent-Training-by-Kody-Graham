@@ -15,7 +15,7 @@ def asset_path(*parts: str) -> str:
 
 #Class for my user and ai ships
 class Player:
-    def __init__(self, x: int, y: int, image_name: str = "ship.png", size: Tuple[int,int] = (100, 50), ) -> None:
+    def __init__(self, x: int, y: int, image_name: str = "ship.png", size: Tuple[int,int] = (99, 33), ) -> None:
 
         #Load the image and then scale it to a normal size
         image_full_path = asset_path(image_name)
