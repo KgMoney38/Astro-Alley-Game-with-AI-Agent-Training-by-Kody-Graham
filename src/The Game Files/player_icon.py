@@ -90,14 +90,14 @@ class Player:
         #Shrink player collision box without changing image size
         #return self.rect.inflate(-self.rect.width * .5, -self.rect.height * .6)
 
-    def draw(self, surface: pygame.Surface) -> None:
+    def draw(self, surface: pygame.Surface, debug: bool = False) -> None:
         #Draw flame
         if self.flame_ms_left > 0:
             self._draw_flame(surface)
         #Draw ship
         surface.blit(self.image, self.rect)
 
-        if DEBUG_SHIP_MASK:
+        if debug:
             self.draw_debug(surface)
 
         #Debug safe area around ship

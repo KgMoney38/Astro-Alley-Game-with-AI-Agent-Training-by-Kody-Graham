@@ -15,9 +15,6 @@ PIPE_SPEED = 4
 PIPE_MIN_TOP = 100
 PIPE_MAX_TOP = 400
 
-#To debug my pipes might make it a mode you can on and off later
-DEBUG_PIPE_OVERLAY = True
-
 def asset_path(*parts: str) -> str:
     #Resolve path to asset relative to the png
     here = os.path.dirname(os.path.abspath(__file__))
@@ -57,12 +54,6 @@ class Pipe:
         self.top_mask = pygame.mask.from_surface(self.top_image, 1)
         self.bottom_mask = pygame.mask.from_surface(self.bottom_image, 1)
 
-        if DEBUG_PIPE_OVERLAY:
-            self.top_mask_surface= self.top_mask.to_surface(setcolor=(255,0,0, 120), unsetcolor=(0,0,0,0))
-            self.top_mask_surface.set_colorkey((0,0,0))
-            self.bot_mask_surface= self.bottom_mask.to_surface(setcolor=(0,0,255, 120), unsetcolor=(0,0,0,0))
-            self.bot_mask_surface.set_colorkey((0,0,0))
-
     #Factory Method
     @classmethod
     def spawn(cls, screen_width: int, screen_height: int = SCREEN_HEIGHT, image_name: str = "obstacle.png") -> "Pipe":
@@ -94,10 +85,21 @@ class Pipe:
         #pygame.draw.rect(surface, pygame.Color("red"), top_rect,2)
         #pygame.draw.rect(surface, pygame.Color("blue"), bottom_rect,2)
 
+    #Debug helper
+    def ensure_debug_surfaces(self) -> None:
+        if getattr(self, "top_mask_surface", None) is None:
+            self.top_mask_surface = self.top_mask.to_surface(setcolor=(255,0,0, 120), unsetcolor=(0,0,0,0))
+            self.top_mask_surface.set_colorkey((0,0,0))
+        if getattr(self, "bot_mask_surface", None) is None:
+            self.bot_mask_surface = self.bottom_mask.to_surface(setcolor=(0,0,255, 120), unsetcolor=(0,0,0,0))
+            self.bot_mask_surface.set_colorkey((0,0,0))
+
     #Developer Mode: option so i can debug my masks and safe area of the gap
-    def debug_draw(self, surface: pygame.Surface) -> None:
-        if not DEBUG_PIPE_OVERLAY:
+    def debug_draw(self, surface: pygame.Surface, debug: bool = False) -> None:
+        if not debug:
             return
+
+        self.ensure_debug_surfaces()
 
         #Top mask
         surface.blit(self.top_mask_surface, (int(self.x), 0))

@@ -10,6 +10,9 @@ import pygame
 from typing import List, Optional
 import os
 
+from pygame import surface
+from pygame.draw_py import draw_line
+
 os.environ.setdefault("SDL_VIDEO_CENTERED", "1")
 from launch_video import play_video_cover, play_video_sequence_cover
 
@@ -25,7 +28,7 @@ AI_DIR= os.path.abspath(os.path.join(BASE_DIR, "..", "The AI Files"))
 if AI_DIR not in sys.path:
     sys.path.insert(0,AI_DIR)
 
-from autopilot_torch import TorchPolicy
+from autopilot_torch import TorchPolicy #Ignore warning goes away at compile time only shows error because i have my files separated into different directory's for neatness
 
 #Sound effects
 pygame.mixer.pre_init(44100, -16, 2, 512)
@@ -47,6 +50,8 @@ text = (255,255,255)
 #For highest score which will be lifetime not just runtime
 DATA_DIR= os.path.join(os.path.dirname(__file__), "data")
 HIGH_SCORE_FILE = os.path.join(DATA_DIR, "highscore.json")
+USER_SCORE_FILE = os.path.join(DATA_DIR, "highscore_user.json")
+AI_SCORE_FILE = os.path.join(DATA_DIR, "highscore_ai.json")
 
 #Protect All-Time High Score!
 SECRET_KEY= "SECRET-DEMO-KEY-v1:: 9d8d7ea4b6b940aa8b4e2f0a1d5f37"
@@ -97,6 +102,32 @@ def save_high_score(score: int) -> None:
     with open(HIGH_SCORE_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f)
 
+#For my extra ai and user save files
+def load_score(path: str) -> int:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        score = int(data.get("score", 0))
+        salt = data.get("salt", "")
+        sig = data.get("sig", "")
+
+        # Verify
+        if sig and hmac.compare_digest(sig, _sign(score, salt)):
+            return score
+        # MISSING OR INVALID!
+        return 0
+
+    except Exception:
+        return 0
+
+#For my extra ai and user save files
+def save_score(path: str, score: int) -> None:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    salt = os.urandom(16).hex()
+    sig = _sign(int(score), salt)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"score": int(score), "salt": salt, "sig": sig}, f)
+
 #My game logic and implementation class
 class Game:
     def __init__(self) -> None:
@@ -115,6 +146,9 @@ class Game:
         pygame.display.set_caption("Astro Alley")
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont(None, 50)
+        self.small_font = pygame.font.SysFont(None, 36)
+        self.leaderboard_font = pygame.font.SysFont(None, 50)
+        self.leaderboard_font.set_underline(True)
 
         #Play music
         self._music_paused = False
@@ -122,6 +156,9 @@ class Game:
 
         #Launch Screen
         self.custom_window_size(fullscreen=True)
+
+        #Developer mode
+        self.dev_mode = False #Off by default
 
         #Verify my videos that I added to make my game look more professional are available
         try:
@@ -173,7 +210,11 @@ class Game:
         #Score and flags
         self.score = 0
         self.high_score = 0
-        self.all_time_high_score = load_high_score()
+        self.user_high_score = load_score(USER_SCORE_FILE)
+        self.ai_high_score = load_score(AI_SCORE_FILE)
+        self.all_time_high_score= load_high_score()
+        self.all_time_high_score = max(self.all_time_high_score, self.user_high_score, self.ai_high_score)
+
         self.rounds_played = 0
         self.game_over = False
         self._spawn_frames = 0
@@ -279,6 +320,16 @@ class Game:
                 self.snd_crash.play()
             if self.score > self.high_score:
                 self.high_score = self.score
+
+            if self.ai_enabled:
+                if self.score > self.ai_high_score:
+                    self.ai_high_score = self.score
+                    save_score(AI_SCORE_FILE, self.ai_high_score)
+            else:
+                if self.score > self.user_high_score:
+                    self.user_high_score = self.score
+                    save_score(USER_SCORE_FILE, self.user_high_score)
+
             if self.score > self.all_time_high_score:
                 self.all_time_high_score = self.score
                 save_high_score(self.all_time_high_score)
@@ -463,6 +514,10 @@ class Game:
 
         #Track the collisions
         ship_rect = self.player.get_rect() #Image rectangle
+        if ship_rect.top <0 or ship_rect.bottom > SCREEN_HEIGHT:
+            self._on_game_over()
+            return
+
         player_mask = getattr(self.player, "mask", None)
 
         if player_mask is None:
@@ -517,12 +572,12 @@ class Game:
         #Obstacles and the player
         for pipe in self.pipes:
             pipe.draw(s)
-        self.player.draw(s)
 
-        try:
-            pipe.debug_draw(s)
-        except AttributeError:
-            pass
+        if self.dev_mode:
+            for p in self.pipes:
+                p.debug_draw(s, debug=True)
+
+        self.player.draw(s, debug=self.dev_mode)
 
         #score and high score
         score_surface = self.font.render(str(self.score), True, text)
@@ -558,9 +613,52 @@ class Game:
 
         if self.game_over:
             s.blit(msg_surface, (cx - msg_surface.get_width() // 2, cy - msg_surface.get_height() // 2))
-            # Alltime high
+
+            # Scoreboard background
+            x, y, w, h = SCREEN_WIDTH // 4, SCREEN_HEIGHT // 14, 495, 200
+            smoke = pygame.Surface((w, h), pygame.SRCALPHA)
+            smoke.fill((0, 0, 0, 160))
+            s.blit(smoke, (x, y))
+
+            #Add a leader board for man vs machine
+            leaderboard_surface = self.font.render(f"ALL-TIME HIGHSCORE",True, (255,0,0))
+            lb_surface = self.leaderboard_font.render(f"LEADERBOARD", True, (255,0,0))
+            all_y = cy - msg_surface.get_height() // 2+ msg_surface.get_height()
+            s.blit(leaderboard_surface, (cx - leaderboard_surface.get_width() // 2, all_y-353))
+            s.blit(lb_surface, (cx - lb_surface.get_width() // 2, all_y-310))
+
+            #Alltime high
             ath_surface = self.font.render(f"All-Time High Score: {self.all_time_high_score}", True, text)
-            s.blit(ath_surface, (cx - ath_surface.get_width() // 2, cy - ath_surface.get_height() // 2 + msg_surface.get_height() + 12))
+            all_y = cy - msg_surface.get_height() // 2+ msg_surface.get_height() +12
+            s.blit(ath_surface, (cx - ath_surface.get_width() // 2, all_y))
+
+            #Score board numbers and background
+            first_place_surface = self.font.render(f"1st", True, (255,0,0))
+            second_place_surface = self.font.render(f"2nd", True, (0,0,255))
+            s.blit(first_place_surface, (cx - first_place_surface.get_width() // 2- 180, all_y - first_place_surface.get_height() -245))
+            s.blit(second_place_surface,(cx - second_place_surface.get_width() // 2 - 180, all_y - second_place_surface.get_height() - 205))
+
+            #Logic for leader board
+            if self.user_high_score > self.ai_high_score:
+                #User best
+                user_surface = self.small_font.render(f"User: {self.user_high_score}", True, (255,0,0))
+                user_y = all_y - user_surface.get_height() -248
+                s.blit(user_surface, (cx - user_surface.get_width() // 2, user_y))
+
+                #AI High
+                ai_surface = self.small_font.render(f"AI-Trained Agent: {self.ai_high_score}", True, (0,0,255))
+                ai_y= all_y - ath_surface.get_height() -195
+                s.blit(ai_surface, (cx - ai_surface.get_width() // 2, ai_y))
+            else:
+                # User best
+                user_surface = self.small_font.render(f"User: {self.user_high_score}", True, (0, 0, 255))
+                user_y = all_y - user_surface.get_height() - 195
+                s.blit(user_surface, (cx - user_surface.get_width() // 2, user_y))
+
+                # AI High
+                ai_surface = self.small_font.render(f"AI-Trained Agent: {self.ai_high_score}", True, (255, 0, 0))
+                ai_y = all_y - ath_surface.get_height() - 248
+                s.blit(ai_surface, (cx - ai_surface.get_width() // 2, ai_y))
 
             #AI auto restart
             if self.ai_enabled and self.ai_restart_timer:

@@ -205,6 +205,10 @@ class CustomizeMenu:
         #Music toggle
         self.music_toggle = IconToggle(center=(98,670), image_on_path=asset_path("music_on.png"), image_off_path=asset_path("music_off.png"),get_state=lambda: not game._music_paused, on_toggle= game.toggle_music, size=58)
 
+        #Debug toggle
+        w,h = game.screen.get_size()
+        self.debug_toggle = IconToggle(center= (w-98,670), image_on_path=asset_path("debug_on.png"),image_off_path=asset_path("debug_off.png"), size=58, get_state= lambda: bool(self.game.dev_mode), on_toggle= lambda: setattr(self.game, "dev_mode", not bool(self.game.dev_mode)))
+
         #Basic Buttons
         self.btn_back = Button("Back", pygame.Rect(30, h-70, 140, 50), self.font, game.open_menu)
         self.btn_start = Button("Launch!", pygame.Rect(w-210, h-70, 180, 50), self.font, self._save_and_start)
@@ -338,6 +342,8 @@ class CustomizeMenu:
             self.btn_back.rect.topleft=(30,h-70)
             self.btn_start.rect.topright=(w-30,h-70)
 
+            self.debug_toggle.rect.center = (w-98, 670)
+
             self.position_arrows(w)
 
             self.last_side= (w,h)
@@ -414,6 +420,7 @@ class CustomizeMenu:
         self.music_toggle.handle_event(event)
         self.btn_back.handle_event(event)
         self.btn_start.handle_event(event)
+        self.debug_toggle.handle_event(event)
 
     #Draw the rows and border
     def _draw_row(self, surface, items, rects, sel_idx):
@@ -495,6 +502,14 @@ class CustomizeMenu:
         self.music_toggle.draw(surface)
         self.btn_back.draw(surface)
         self.btn_start.draw(surface)
+
+        #Debug
+        dbg_lbl = self.font.render("Debug", True, (255,255,255))
+        dbg_x = surface.get_width() - dbg_lbl.get_width()-50
+        dbg_y= 590
+        surface.blit(dbg_lbl, (dbg_x, dbg_y))
+        pygame.draw.line(surface, (255,255,255),(dbg_x, dbg_y+dbg_lbl.get_height()+4),(dbg_x+ dbg_lbl.get_width(), dbg_y+dbg_lbl.get_height()+4), 3)
+        self.debug_toggle.draw(surface)
 
         self.draw_copilot_label(surface)
 
