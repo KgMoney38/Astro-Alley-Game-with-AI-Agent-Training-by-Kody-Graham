@@ -7,6 +7,9 @@ import os
 from typing import Tuple, Optional
 import pygame
 
+#Mask just like in barriers
+DEBUG_SHIP_MASK = True
+
 #Resolve the path so that the image will always load correctly
 def asset_path(*parts: str) -> str:
     #Resolve assets so the file will load from any working directory
@@ -15,18 +18,19 @@ def asset_path(*parts: str) -> str:
 
 #Class for my user and ai ships
 class Player:
-    def __init__(self, x: int, y: int, image_name: str = "ship.png", size: Tuple[int,int] = (99, 33), ) -> None:
+    def __init__(self, x: int, y: int, image_name: str = "ship.png", size: Tuple[int,int] = (99, 33)) -> None:
 
         #Load the image and then scale it to a normal size
         image_full_path = asset_path(image_name)
         self.base_image = pygame.image.load(image_full_path).convert_alpha()
+
         if size:
             self.base_image = pygame.transform.smoothscale(self.base_image, size)
 
         #This will be the image that is actually displayed
         self.image: pygame.Surface = self.base_image.copy()
         self.rect: pygame.Rect = self.image.get_rect(center = (x, y))
-        self.mask: pygame.Mask = pygame.mask.from_surface(self.image, 32) #Mask image so collisions only happen on ship
+        self.mask: pygame.Mask = pygame.mask.from_surface(self.image, 1) #Mask image so collisions only happen on ship
 
         #Set up the physics for the game
         self.vel_y: float = 0.0
@@ -61,23 +65,20 @@ class Player:
 
     def update(self, dt_ms: int) -> None:
         #Apply the gravity effect
-        self.vel_y += self.gravity
-        if self.vel_y > self.max_fall_speed:
-            self.vel_y = self.max_fall_speed
+        self.vel_y = min(self.max_fall_speed, self.vel_y+ self.gravity)
 
         #Move
         self.rect.y += int(self.vel_y)
 
         #Calculate the tilt based on the fall speed
         v = max(-10.0, min(10.0, self.vel_y))
-        span_in = 20.0 #Range -10 to 10
-        t = (v+ 10.0) / span_in
+        t = (v+ 10.0) / 20.0
         self.tilt = self.max_tilt_up + t * (self.max_tilt_down - self.max_tilt_up)
 
         #Rotate based on the center
         self.image = pygame.transform.rotozoom(self.base_image, -self.tilt, 1.0)
         self.rect = self.image.get_rect(center = self.rect.center)
-        self.mask = pygame.mask.from_surface(self.image, 32)
+        self.mask = pygame.mask.from_surface(self.image, 1)
 
         #Flame timer
         if self.flame_ms_left > 0:
@@ -96,6 +97,9 @@ class Player:
         #Draw ship
         surface.blit(self.image, self.rect)
 
+        if DEBUG_SHIP_MASK:
+            self.draw_debug(surface)
+
         #Debug safe area around ship
         #pygame.draw.rect(surface, pygame.Color("purple"), self.rect,2)
 
@@ -110,7 +114,7 @@ class Player:
         self.tilt = 0.0
         self.image = self.base_image.copy()
         self.rect = self.image.get_rect(center = self.rect.center)
-        self.mask = pygame.mask.from_surface(self.image, 32)#rebuild mask
+        self.mask = pygame.mask.from_surface(self.image, 1)#rebuild mask
         self.flame_ms_left = 0
 
     #Flame Helper
@@ -128,9 +132,14 @@ class Player:
         center = anchor + push_back
 
         #Slow flame slightly so it aligns with back of ship
-        center.y = center.y-27
-        center.x= center.x-5
-
+        center.y -= 27
+        center.x -= 5
         flame_rect= flame.get_rect(center = (int(center.x), int(center.y)))
 
+        #Draw it
         surface.blit(flame, flame_rect)
+
+    def draw_debug(self, surface: pygame.Surface) -> None:
+        mask_surface= self.mask.to_surface(setcolor= (255,0, 200, 120), unsetcolor= (0,0, 0, 0))
+        mask_surface.set_colorkey((0,0,0))
+        surface.blit(mask_surface, self.rect.topleft)

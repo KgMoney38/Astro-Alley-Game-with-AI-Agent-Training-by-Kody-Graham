@@ -463,42 +463,28 @@ class Game:
 
         #Track the collisions
         ship_rect = self.player.get_rect() #Image rectangle
-        player_rect = self.player.rect
         player_mask = getattr(self.player, "mask", None)
 
-        for pipe in self.pipes:
-            top_rect, bot_rect = pipe.rects()
-
-            #Fast reject
-            hit_top_aabb = player_rect.colliderect(top_rect)
-            hit_bot_aabb = player_rect.colliderect(bot_rect)
-            if not (hit_top_aabb or hit_bot_aabb):
-                continue
-
-            if player_mask is None:
-                self._on_game_over()
-                break
-
-            #Mask overlap vs the filled rectangle masks
-            if hit_top_aabb:
-                top_mask = pygame.Mask((top_rect.width, top_rect.height))
-                top_mask.fill()
-                offset = (top_rect.left- player_rect.left, top_rect.top- player_rect.top)
-                if player_mask.overlap(top_mask, offset):
-                    self._on_game_over()
-                    break
-
-            if hit_bot_aabb:
-                bot_mask = pygame.Mask((bot_rect.width, bot_rect.height))
-                bot_mask.fill()
-                offset = (bot_rect.left- player_rect.left, bot_rect.top- player_rect.top)
-                if player_mask.overlap(bot_mask, offset):
-                    self._on_game_over()
-                    break
-
-        #Check top/bottom collision
-        if ship_rect.bottom > SCREEN_HEIGHT or ship_rect.top < 0:
+        if player_mask is None:
             self._on_game_over()
+        else:
+            collided = False
+            for p in self.pipes:
+                #Top
+                top_offset= (int(p.x)-ship_rect.left,0- ship_rect.top)
+                if player_mask.overlap(p.top_mask, top_offset):
+                    collided = True
+                    break
+
+                #Bottom half
+                by = p.top_height + p.gap
+                bottom_offset= (int(p.x)-ship_rect.left,int(by) - ship_rect.top)
+                if player_mask.overlap(p.bottom_mask, bottom_offset):
+                    collided = True
+                    break
+
+            if collided:
+                self._on_game_over()
 
         #Vertical error for my graph
         p=self.next_pipe()
@@ -533,6 +519,11 @@ class Game:
             pipe.draw(s)
         self.player.draw(s)
 
+        try:
+            pipe.debug_draw(s)
+        except AttributeError:
+            pass
+
         #score and high score
         score_surface = self.font.render(str(self.score), True, text)
         s.blit(score_surface, (SCREEN_WIDTH// 2 - score_surface.get_width() // 2, 20))
@@ -546,13 +537,19 @@ class Game:
 
         #AI Badge
         if self.ai_enabled:
-            mode= "Torch"
-            label = self.hud_font.render(f"AI: {mode}", True, text)
+            mode= "Engaged"
+            label = self.hud_font.render(f"Autopilot: {mode}", True, text)
             pad =6
             bg_rect= pygame.Rect(12-pad,12-pad,label.get_width()+pad*2,label.get_height()+ pad*2)
             pygame.draw.rect(s,(0,0,0),bg_rect, border_radius=6)
             s.blit(label, (12,12))
-
+        else:
+            mode = "Disengaged"
+            label = self.hud_font.render(f"Autopilot: {mode}", True, text)
+            pad = 6
+            bg_rect = pygame.Rect(12 - pad, 12 - pad, label.get_width() + pad * 2, label.get_height() + pad * 2)
+            pygame.draw.rect(s, (0, 0, 0), bg_rect, border_radius=6)
+            s.blit(label, (12, 12))
 
 
         #Game over!

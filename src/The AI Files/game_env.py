@@ -42,7 +42,7 @@ class GameEnv:
             height: int = SCREEN_HEIGHT,
             pipe_speed: int= PIPE_SPEED,
             pipe_width: int =PIPE_WIDTH,
-            gap: int = PIPE_GAP,
+            gap: int = max(40, PIPE_GAP-20),
             pipe_dx: int = 360,
             gravity: float = 0.5,
             jump_impulse: float=-10.0,
@@ -51,11 +51,11 @@ class GameEnv:
 
 
             #Rewards
-            pass_reward: float= 8.0,
-            crash_penalty: float = -6.0,
+            pass_reward: float= 10.0,
+            crash_penalty: float = -10.0,
             step_reward: float = .010,
-            jump_penalty: float = .0005,
-            shaping_scale: float = .04,
+            jump_penalty: float = .000,
+            shaping_scale: float = .06,
             shaping_max_dx: float = 260.0,
     ):
         self.width = int(width)
@@ -178,9 +178,21 @@ class GameEnv:
                 cy = next_p.gap_y
                 half_gap = .5 * max(1.0,float(next_p.gap_h))
                 dy_norm = abs(self.py - cy)/ half_gap
-                closeness = 1.0 - min(1.0, float(dy_norm))
+                closeness = 1.0 - min(1.0, dy_norm)
+                closeness_sq= closeness * closeness
                 w= math.exp(-dx/self.shaping_max_dx)
-                reward += self.shaping_scale * w * closeness
+                reward += self.shaping_scale * w * closeness_sq
+                edge_thresh = .6
+                if dy_norm> edge_thresh:
+                    penalty = (dy_norm-edge_thresh)**2
+                    reward -= .06*w* penalty
+
+                if next_p is not None and 0.0 <= dx <=self.shaping_max_dx:
+                    cy = next_p.gap_y
+                    half_gap = .5 * max(1.0,float(next_p.gap_h))
+                    align_raw = (cy- self.py) *(-self.vy)
+                    align_norm = max(-1.0, min(1.0, align_raw/ (10*half_gap)))
+                    reward += .02 * w * align_norm
 
         #Small survival reward and small penalty to discourage spam jumping
         reward += self.step_reward
