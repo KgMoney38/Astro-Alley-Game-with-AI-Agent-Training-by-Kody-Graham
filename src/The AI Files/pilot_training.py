@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 import os, math, copy
+import sys
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -102,6 +104,7 @@ def evaluate_policy(model: ActorCritic, device, episodes: int=25):
 
 #Main training loop
 def train():
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") #Gpu if available
     env= GameEnv() #Instantiate the environment
 
@@ -132,8 +135,8 @@ def train():
     save_path= os.path.join(os.path.dirname(__file__),"autopilot_policy.pt") #Save best model
     best_state_dict = None #Keep track best model
 
-    print("#$#$#$# Stop the program at anytime and the current policy will be saved and training will end. #$#$#$#")
-    print("#$#$#$# Note: Each update = 100 Episodes. #$#$#$#")
+    print("****** Stop the program at anytime and the current policy will be saved and training will end. ******")
+    print("****** Note: Each update = 100 Episodes. ******")
 
     try:
         # PPO outer loop over updates
@@ -299,6 +302,14 @@ def train():
 
 #Run it
 if __name__ == "__main__":
+    print(f"\n******ARE YOU SURE YOU WANT TO START A NEW TRAINING SESSION???******\n"
+          "******DOING SO WILL OVERWRITE THE PREVIOUS SAVED AUTOPILOT_POLICY.pt******\n")
+    answer= input("Do you want to continue? (y/n): ")
+
+    if answer not in ("Yes", "yes", "y", "Y"):
+        print("Training Aborted Before Start!")
+        sys.exit(0)
+
     train()
 
 

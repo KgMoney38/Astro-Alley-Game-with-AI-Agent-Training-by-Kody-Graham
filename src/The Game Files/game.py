@@ -2,7 +2,7 @@
 #8/24/2025
 #Class controls almost all functionality of my game, controls the entire game loop
 
-#Note for self: Done for now
+#Note for self: Done NOW
 
 import sys
 from collections import deque
@@ -738,28 +738,31 @@ class Game:
                 stat= self.hud_font.render(f"Live Error: now: {cur:+.1f}px | MAE (recent): {mae:.1f}px", True, (0,0,255))
                 s.blit(stat, (int(x1-SCREEN_WIDTH*.5), y1-22))
 
-        #Scaling parameters for the game screen
-        win_width, win_height = self.screen.get_size()
+        #Use canvas so scaling is right on any machine
+        win_w, win_h = self.screen.get_size()
         content_h = SCREEN_HEIGHT + (self.graph_h if self.ai_enabled else 0)
 
-        src_rect = pygame.Rect(0, 0, SCREEN_WIDTH, content_h)
+        #Source
+        src_rect= pygame.Rect(0,0, SCREEN_WIDTH, content_h)
         src_surface = self.canvas.subsurface(src_rect)
 
-        #Different scaling when AI is enabled
-        if self.ai_enabled:
-            scale= min(win_width/SCREEN_WIDTH, win_height/content_h)
-            dst_width, dst_height = int(SCREEN_WIDTH*scale*1.78), int(content_h*scale)
-            offset_x= (win_width-dst_width)//2
-            offset_y=0
-        else:
-            scale = max(win_width / SCREEN_WIDTH, win_height / content_h)
-            dst_width, dst_height = int(SCREEN_WIDTH * scale), int(content_h * scale * .75)
-            offset_x = (win_width - dst_width) // 2
-            offset_y = (win_height - dst_height) // 2
+        #Keep same vertical size but force fill window width
+        scale_y = min(win_h/ float(content_h), win_w / float(SCREEN_WIDTH))
+        dst_h = max(1, int(content_h * scale_y))
+        dst_w = win_w
 
-        frame = pygame.transform.smoothscale(src_surface, (dst_width, dst_height))
+        down_x = dst_w <= SCREEN_WIDTH
+        down_y = dst_h <= content_h
+        if down_x and down_y:
+            frame= pygame.transform.smoothscale(src_surface, (dst_w, dst_h))
+        else:
+            frame= pygame.transform.scale(src_surface, (dst_w, dst_h))
+
+        #Never crop
+        offset_y = (win_h- dst_h)//2
+
         self.screen.fill((0,0,0))
-        self.screen.blit(frame, (offset_x, offset_y))
+        self.screen.blit(frame, (0, offset_y))
 
         if self.is_fullscreen:
             self.draw_fullscreen_hint(self.screen)
