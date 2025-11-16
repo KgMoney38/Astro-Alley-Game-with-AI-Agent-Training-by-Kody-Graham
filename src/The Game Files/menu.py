@@ -4,515 +4,628 @@
 
 #Note for self: Done
 
-import pygame
-import os
 
-from PIL.ImageChops import offset
+import pygame, os
+from launch_video import play_video_cover
 
-from launch_video import play_video_cover #For my customize launch video
+#Design-space resolution so the layout scales cleanly on any screen
+DESIGN_W, DESIGN_H = 1280, 720
+AUTOSCROLL_MS  = 1000
+HOVER_DWELL_MS = 1000
+SHIFT_UP = 100
 
+UNSEL_BORDER_COLOR = (40, 40, 40)
 
+#Layout dictionary for my fixed 1280x720 design canvas
+LAYOUT = {
+    "title_y": 14,
+    "ships_title_y": 58,
+    "routes_title_y": 178,
+    "obstacles_title_y": 387,
+
+    "ships": {"y": 111, "box": (150,50), "gap": 30},
+    "routes": {"y": 231, "box": (280,140), "gap": 40},
+    "obstacles": {"y": 450, "box": (70,175), "gap": 50},
+
+    "arrow_pad": 26,
+
+    "music_label": (60, DESIGN_H - 203),
+    "debug_label": (DESIGN_W-180, DESIGN_H-203),
+
+    "back_btn": (30, DESIGN_H-70, 160,52),
+    "launch_btn": (DESIGN_W-210, DESIGN_H-70, 180,52) ,
+
+    "music_toggle": (105, DESIGN_H-130),
+    "debug_toggle": (DESIGN_W-120, DESIGN_H-130),
+
+    "ai_margin_bottom": 15,
+
+    "border_ships": {"pad": 6, "offset": (0,0), "unselected_thickness": 4, "unselected_radius": 12},
+    "border_routes": {"pad": 8, "offset": (0,0), "unselected_thickness": 4, "unselected_radius": 14},
+    "border_obstacles": {"pad": 18, "offset": (0,0), "unselected_thickness": 4, "unselected_radius": 16},
+}
+
+#Helper to build full paths into my assets folder
 def asset_path(*parts: str) -> str:
     here = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(here, "assets", *parts)
 
 #Scale background to fit and center it
 def cover_blit(surface: pygame.Surface, image: pygame.Surface) -> None:
-    sw,sh = surface.get_size()
-    iw,ih = image.get_size()
+    sw, sh = surface.get_size()
+    iw, ih = image.get_size()
     scale = max(sw/iw, sh/ih)
     nw, nh = int(iw*scale), int(ih*scale)
-    scaled = pygame.transform.smoothscale(image, (nw, nh))
-    x=(sw - nw) // 2
-    y=(sh - nh) // 2
-    surface.blit(scaled, (x,y))
+    surface.blit(pygame.transform.smoothscale(image, (nw, nh)),
+                 ((sw-nw)//2, (sh-nh)//2))
+
+#Letterbox my 1280x720 canvas into whatever screen size I'm running
+def letterbox_rect(screen: pygame.Surface) -> pygame.Rect:
+    sw, sh = screen.get_size()
+    s = min(sw / DESIGN_W, sh / DESIGN_H)
+    cw, ch = int(DESIGN_W * s), int(DESIGN_H * s)
+    return pygame.Rect((sw - cw)//2, (sh - ch)//2, cw, ch)
+
+# (path_key, size) -> Surface
+#Simple cache for scaled images so I do not rescale every frame
+_scaled_cache = {}
+
+def get_scaled_image(surf: pygame.Surface, size: tuple[int,int], key: str | None = None) -> pygame.Surface:
+    if key:
+        k = (key, size)
+        cached = _scaled_cache.get(k)
+        if cached: return cached
+    scaled = pygame.transform.smoothscale(surf, size)
+    if key: _scaled_cache[k] = scaled
+    return scaled
 
 #Class for all the buttons on the main and customization menus
 class Button:
-    def __init__(self, text, rect, font, on_click, bg=(40,40,48), fg=(255,255,255)):
-        self.text = text
-        self.rect = pygame.Rect(rect)
+    def __init__(self, label, rect_design, font, on_click,
+                 bg=(40,40,48), fg=(255,255,255)):
+        #Store everything in design-space coordinates so it all scales together
+        self.label = label
+        self.rect_d = pygame.Rect(rect_design)
         self.font = font
         self.on_click = on_click
         self.bg, self.fg = bg, fg
-        self.hovered = False
+        self._hover = False
 
     #Just a listener for the hover over and click of my buttons
-    def handle_event(self, event):
+    def handle_event_d(self, event, pos_d):
         if event.type == pygame.MOUSEMOTION:
-            self.hovered = self.rect.collidepoint(event.pos)
+            self._hover = self.rect_d.collidepoint(pos_d)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if self.rect.collidepoint(event.pos):
+            if self.rect_d.collidepoint(pos_d):
                 self.on_click()
-    
+
     #Draw my buttons
-    def draw(self, surface):
-        color = (80,80,90) if self.hovered else (self.bg)
-        pygame.draw.rect(surface, color, self.rect, border_radius=10)
-        label = self.font.render(self.text, True, self.fg)
-        surface.blit(label, label.get_rect(center=self.rect.center))
+    def draw_d(self, canvas: pygame.Surface):
+        color = (80,80,90) if self._hover else self.bg
+        pygame.draw.rect(canvas, color, self.rect_d, border_radius=12)
+        label = self.font.render(self.label, True, self.fg)
+        canvas.blit(label, label.get_rect(center=self.rect_d.center))
 
 #Class to toggle my music on off icon
 class IconToggle:
-    def __init__(self, center, image_on_path, image_off_path, get_state, on_toggle, size=48):
-
+    def __init__(self, center_d, path_on, path_off, get_state, on_toggle, size_px=52):
+        self.cx, self.cy = center_d
+        self.size = size_px
         self.get_state = get_state
         self.on_toggle = on_toggle
+        self.img_on  = pygame.image.load(path_on).convert_alpha()
+        self.img_off = pygame.image.load(path_off).convert_alpha()
+        self.rect_d = pygame.Rect(0,0,size_px,size_px)
+        self.rect_d.center = center_d
 
-        on_img = pygame.image.load(image_on_path).convert_alpha()
-        off_img = pygame.image.load(image_off_path).convert_alpha()
-        self.img_on = pygame.transform.smoothscale(on_img, (size, size))
-        self.img_off = pygame.transform.smoothscale(off_img, (size, size))
-        self.rect = self.img_on.get_rect(center=center)
-    
     #Listener for my music on off button
-    def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button ==1:
-            if self.rect.collidepoint(event.pos):
+    def handle_event_d(self, event, pos_d):
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.rect_d.collidepoint(pos_d):
                 self.on_toggle()
-    
+
     #Draw it
-    def draw(self, surface):
+    def draw_d(self, canvas: pygame.Surface):
         img = self.img_on if self.get_state() else self.img_off
-        surface.blit(img, self.rect)
+        scaled = pygame.transform.smoothscale(img, (self.size, self.size))
+        r = scaled.get_rect(center=(self.cx, self.cy))
+        self.rect_d = r
+        canvas.blit(scaled, r)
 
 #Class for the start screen of my game
 class MainMenu:
     def __init__(self, game):
         self.game = game
-        w, h = game.screen.get_size()
-        cx = w // 2
-        f = game.font
-        
+        #Render everything to a fixed 1280x720 canvas first, then scale it to the real screen
+        self.canvas = pygame.Surface((DESIGN_W, DESIGN_H)).convert_alpha()
         #Main menu background path
         bg_path = asset_path("menu_bg.jpg")
+        self.raw_bg = pygame.image.load(bg_path).convert() if os.path.exists(bg_path) else None
+        self.overlay = pygame.Surface((DESIGN_W, DESIGN_H), pygame.SRCALPHA)
+        self.overlay.fill((0,0,0,110))
 
-        self.raw_bg= pygame.image.load(bg_path).convert() if os.path.exists(bg_path) else None
-        self.overlay = None
-
-        #Buttons
-        self.buttons = []
-        self.y_offset=[]
-
+        f = game.font
+        cx = DESIGN_W//2 - 180
         #Add my menu options to the main menu
-        def add(label, cb, y_offset):
-            r = pygame.Rect(0, 0, 360, 64)
-            self.buttons.append(Button(label, r, f, cb))
-            self.y_offset.append(y_offset)
+        self.buttons = [
+            Button("Start Game - User",      (cx, 300, 360, 64), f, game.start_user_game),
+            Button("Start - Auto Pilot(AI)", (cx, 380, 360, 64), f, game.start_ai_game),
+            Button("Mission Control",        (cx, 460, 360, 64), f, game.open_customize),
+            Button("Exit",                   (cx, 540, 360, 64), f, game.quit),
+        ]
 
-        add("Start Game - User", game.start_user_game, -90)
-        add("Start - Auto Pilot(AI)", game.start_ai_game, -10)
-        add("Mission Control", game.open_customize, 70)
-        add("Exit", game.quit, 150)
+    #Convert real mouse position into my design-space coordinates
+    def _screen_to_design(self, screen_pos):
+        rect = letterbox_rect(self.game.screen)
+        if not rect.collidepoint(screen_pos): return None
+        sx = (screen_pos[0] - rect.x) / rect.w
+        sy = (screen_pos[1] - rect.y) / rect.h
+        return (sx * DESIGN_W, sy * DESIGN_H)
 
+    #Feed design-space mouse coords into the button listeners
+    def handle_event(self, event):
+        pos_d = None
+        if event.type in (pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN):
+            pos_d = self._screen_to_design(pygame.mouse.get_pos())
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.game.set_fullscreen(not self.game.is_fullscreen); return
+        if pos_d:
+            for b in self.buttons:
+                b.handle_event_d(event, pos_d)
 
-    def handle_event(self , event):
-        #Esc listener
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE:
-                self.game.set_fullscreen(not self.game.is_fullscreen)
-                return
-
-        for b in self.buttons:
-            b.handle_event(event)
-
-    #Draw background
-    def draw(self, surface):
-
-        if self.raw_bg:
-            cover_blit(surface, self.raw_bg)
-            if(self.overlay is None) or (self.overlay.get_size() != surface.get_size()):
-                self.overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
-                self.overlay.fill((0,0,0,110))
-            surface.blit(self.overlay, (0, 0))
-
-        else:
-            surface.fill((0, 0, 0))
-
-        center_x = surface.get_width()//2
-        center_y = surface.get_height()//2
-        
-        for b, dir_y in zip(self.buttons, self.y_offset):
-            b.rect.centerx=center_x
-            b.rect.centery=center_y +dir_y
-        
-        #Old label for main menu
-        #title = self.game.font.render("Astro Alley", True, (255,0,0))
-        #surface.blit(title, title.get_rect(midtop=(surface.get_width()//2, 60)))
-        
-        for b in self.buttons:
-            b.draw(surface)
-        
-        #Display the press esc hint
-        self.game.draw_fullscreen_hint(surface)
+    def draw(self, screen):
+        c = self.canvas
+        c.fill((0,0,0))
+        if self.raw_bg: cover_blit(c, self.raw_bg); c.blit(self.overlay, (0,0))
+        for b in self.buttons: b.draw_d(c)
+        rect = letterbox_rect(screen)
+        frame = pygame.transform.smoothscale(c, (rect.w, rect.h))
+        screen.fill((0,0,0)); screen.blit(frame, rect.topleft)
+        self.game.draw_fullscreen_hint(screen)
 
 #Class for my customization menu
 class CustomizeMenu:
     def __init__(self, game):
         self.game = game
         self.font = game.font
-        self.copilot_font= pygame.font.SysFont(None, 33)
-        self.copilot_rect = pygame.Rect(0, 0, 0, 0)
-        self.ship_files = ["ship.png", "ship1.png", "ship2.png", "ship3.png", "ship4.png", "ship5.png", "ship6.png", "ship7.png", "ship8.png", "ship9.png"]
-        self.bg_files = ["strip_background.png", "strip_background1.png", "strip_background2.png", "strip_background3.png", "strip_background4.png", "strip_background5.png", "strip_background6.png", "strip_background7.png", "strip_background8.png", "strip_background9.png"]
-        self.ob_files = ["obstacle.png", "obstacle1.png", "obstacle2.png" , "obstacle3.png", "obstacle4.png", "obstacle5.png", "obstacle6.png", "obstacle7.png", "obstacle8.png", "obstacle9.png"]
+        #Use a separate 1280x 720 canvas for the customize screen
+        self.canvas = pygame.Surface((DESIGN_W, DESIGN_H)).convert_alpha()
 
-        #For my scrollable menu
-        self.ships_files= self.collect_varients("ship", 9)
-        self.bg_files = self.collect_varients("strip_background", 9)
-        self.ob_files = self.collect_varients("obstacle", 9)
+        #Background image with a dark overlay
+        path = asset_path("customize_bg.png")
+        self.customize_bg = pygame.image.load(path).convert() if os.path.exists(path) else None
+        self.overlay = pygame.Surface((DESIGN_W, DESIGN_H), pygame.SRCALPHA)
+        self.overlay.fill((0,0,0,120))
 
-        bg_path = asset_path("customize_bg.png")
-        self.customize_bg = pygame.image.load(bg_path).convert() if os.path.exists(bg_path) else None
-        self.customize_overlay = None
+        #Selected border image that gets cropped down to just the visible frame
+        self.border_png_raw = None
+        self.border_png_cropped = None
+        border_path = asset_path("border.png")
+        if os.path.exists(border_path):
+            base = pygame.image.load(border_path).convert_alpha()
+            self.border_png_raw = base
+            mask = pygame.mask.from_surface(base)
+            rects = mask.get_bounding_rects()
+            if rects:
+                bbox = rects[0].copy()
+                for r in rects[1:]:
+                    bbox.union_ip(r)
+                self.border_png_cropped = base.subsurface(bbox).copy()
+            else:
+                self.border_png_cropped = base
 
-        #Build thumbnails:
+        #Unselected border image so side tiles have a different frame
+        self.border_unsel_png_raw = None
+        self.border_unsel_png_cropped = None
+        border_unsel_path = asset_path("border_unselected.png")
+        if os.path.exists(border_unsel_path):
+            base_u = pygame.image.load(border_unsel_path).convert_alpha()
+            self.border_unsel_png_raw = base_u
+            mask_u = pygame.mask.from_surface(base_u)
+            rects_u = mask_u.get_bounding_rects()
+            if rects_u:
+                bbox_u = rects_u[0].copy()
+                for r in rects_u[1:]:
+                    bbox_u.union_ip(r)
+                self.border_unsel_png_cropped = base_u.subsurface(bbox_u).copy()
+            else:
+                self.border_unsel_png_cropped = base_u
 
-        #Cropped ships
-        self.ships = [(name, self._load(asset_path(name),(200,69), alpha=True)) for name in self.ship_files if os.path.exists(asset_path(name))]
+        #Collect all of my ship, route, and obstacle image names
+        self.ship_files = [f"ship{i if i else ''}.png" for i in range(0,10)]
+        self.bg_files   = [f"strip_background{i if i else ''}.png" for i in range(0,10)]
+        self.ob_files   = [f"obstacle{i if i else ''}.png" for i in range(0,10)]
 
-        #Backgrounds cropped
-        self.bgs = [(name, self._bg_preview(asset_path(name), crop_w=900, crop_h=800, thumb=(300,160))) for name in self.bg_files if os.path.exists(asset_path(name))]
+        #Build thumbnails for each row so I am not drawing full resolution files every frame
+        self.ships = [(n, self._load(asset_path(n), LAYOUT["ships"]["box"], True))
+                      for n in self.ship_files if os.path.exists(asset_path(n))]
+        self.bgs   = [(n, self._bg_preview(asset_path(n), 900, 800, LAYOUT["routes"]["box"]))
+                      for n in self.bg_files   if os.path.exists(asset_path(n))]
+        self.obs   = [(n, self._load(asset_path(n), LAYOUT["obstacles"]["box"], True))
+                      for n in self.ob_files   if os.path.exists(asset_path(n))]
 
-        #Obstacles
-        self.obs = [(name, self._load(asset_path(name), (95, 220), alpha=True)) for name in self.ob_files if os.path.exists(asset_path(name))]
+        #Figure out which ship/bg/obstacle is currently selected when I open the menu
+        self.ship_idx = self._index_from(os.path.basename(game.selected_ship), self.ships)
+        self.bg_idx   = self._index_from(os.path.basename(game.selected_bg),   self.bgs)
+        self.ob_idx   = self._index_from(os.path.basename(game.selected_ob),   self.obs)
 
-        self.ship_idx = self._index_from_name(self.ships, os.path.basename(game.selected_ship))
-        self.bg_idx = self._index_from_name(self.bgs, os.path.basename(game.selected_bg))
-        self.ob_idx = self._index_from_name(self.obs, os.path.basename(game.selected_ob))
+        #Create three centered rows of rects for ships, routes, and obstacles
+        self.ship_rects = self._row_centered(3, *LAYOUT["ships"]["box"], LAYOUT["ships"]["y"], LAYOUT["ships"]["gap"])
+        self.bg_rects   = self._row_centered(3, *LAYOUT["routes"]["box"], LAYOUT["routes"]["y"], LAYOUT["routes"]["gap"])
+        self.ob_rects   = self._row_centered(3, *LAYOUT["obstacles"]["box"], LAYOUT["obstacles"]["y"], LAYOUT["obstacles"]["gap"])
 
-        w, h = game.screen.get_size()
+        #Left and right arrow hitboxes for each row
+        self.arrow_left  = self._try_img("arrow_left.png",  (72,36))
+        self.arrow_right = self._try_img("arrow_right.png", (72,36))
+        self.ship_left_r, self.ship_right_r = self._arrow_rects(self.ship_rects)
+        self.bg_left_r,   self.bg_right_r   = self._arrow_rects(self.bg_rects)
+        self.ob_left_r,   self.ob_right_r   = self._arrow_rects(self.ob_rects)
 
-        self.ship_rects = self._row_rects_centered(count = 3, box_w=210, box_h=110, y=130, gap=28, screen_w=w)
-        self.bg_rects = self._row_rects_centered(count=3, box_w=300, box_h=170, y=300, gap=28, screen_w=w)
-        self.ob_rects = self._row_rects_centered(count=3, box_w=110, box_h=250, y=528, gap=55, screen_w=w)
+        #Music and debug toggles reuse the same IconToggle helper
+        self.music_toggle = IconToggle(LAYOUT["music_toggle"], asset_path("music_on.png"), asset_path("music_off.png"),
+                                       get_state=lambda: not game._music_paused, on_toggle=game.toggle_music, size_px=52)
+        self.debug_toggle = IconToggle(LAYOUT["debug_toggle"], asset_path("debug_on.png"), asset_path("debug_off.png"),
+                                       get_state=lambda: bool(self.game.dev_mode),
+                                       on_toggle=lambda: setattr(self.game, "dev_mode", not bool(self.game.dev_mode)), size_px=52)
 
-        #Next/pre arrows
-        self.arrow_left_img = None
-        self.arrow_right_img = None
-        try:
-            self.arrow_left_img = self._load(asset_path("arrow_left.png"), (100,50), alpha=True)
-            self.arrow_right_img = self._load(asset_path("arrow_right.png"), (100,50), alpha=True)
-        except Exception as e:
-            print("Failed to load arrow", e)
+        #Back and Launch buttons for leaving this screen or starting the game
+        self.btn_back  = Button("Back",    LAYOUT["back_btn"],   self.font, game.open_menu)
+        self.btn_start = Button("Launch!", LAYOUT["launch_btn"], self.font, self._save_and_start)
 
-        self.ship_left_arrow, self.ship_right_arrow = self.arrow_rects_for_row(self.ship_rects)
-        self.bg_left_arrow, self.bg_right_arrow = self.arrow_rects_for_row(self.bg_rects)
-        self.ob_left_arrow, self.ob_right_arrow = self.arrow_rects_for_row(self.ob_rects)
+        self.copilot_rect = pygame.Rect(0,0,0,0)
 
-        self.position_arrows(w)
+        #Music track arrows
+        mx, my = LAYOUT["music_toggle"]
+        self.music_arrow_left = self._try_img("arrow_left.png", (38,25))
+        self.music_arrow_right = self._try_img("arrow_right.png", (38,25))
 
-        #Music toggle
-        self.music_toggle = IconToggle(center=(98,670), image_on_path=asset_path("music_on.png"), image_off_path=asset_path("music_off.png"),get_state=lambda: not game._music_paused, on_toggle= game.toggle_music, size=58)
+        if self.music_arrow_left:
+            self.music_left_rect = self.music_arrow_left.get_rect()
+            self.music_left_rect.center = (mx - 50, my)
+        else:
+            self.music_left_rect = pygame.Rect(0,0,0,0)
 
-        #Debug toggle
-        w,h = game.screen.get_size()
-        self.debug_toggle = IconToggle(center= (w-98,670), image_on_path=asset_path("debug_on.png"),image_off_path=asset_path("debug_off.png"), size=58, get_state= lambda: bool(self.game.dev_mode), on_toggle= lambda: setattr(self.game, "dev_mode", not bool(self.game.dev_mode)))
+        if self.music_arrow_right:
+            self.music_right_rect = self.music_arrow_right.get_rect()
+            self.music_right_rect.center = (mx + 50, my)
+        else:
+            self.music_right_rect = pygame.Rect(0,0,0,0)
 
-        #Basic Buttons
-        self.btn_back = Button("Back", pygame.Rect(30, h-70, 140, 50), self.font, game.open_menu)
-        self.btn_start = Button("Launch!", pygame.Rect(w-210, h-70, 180, 50), self.font, self._save_and_start)
+        #Music index indicator
+        self.music_slot_rects = []
+        slots = 5
 
-        self.last_side=game.screen.get_size()
+        slot_size = 15
+        slot_gap=10
 
-    #Collect images into list
-    def collect_varients(self, base_name: str, max_index: int) -> list[str]:
+        #x,y
+        bar_y =my+33
+        bar_width = slots * slot_size + (slots-1)*slot_gap
 
-        files: list[str] = []
-        for i in range(max_index+1):
-            suffix = "" if i == 0 else str(i)
-            fname = f"{base_name}{suffix}.png"
-            if os.path.exists(asset_path(fname)):
-                files.append(fname)
+        bar_x= mx- bar_width //2
 
-        return files
+        for i in range(slots):
+            r = pygame.Rect(bar_x+ i * (slot_size+slot_gap), bar_y, slot_size, slot_size)
+            self.music_slot_rects.append(r)
 
-    #Label for whether AI is enabled or not
-    def draw_copilot_label(self, surface: pygame.Surface) -> None:
-        enabled= bool(getattr(self.game,"ai_enabled", False))
-        base= self.font.render("AI Copilot: ", True, (255,255,255))
-        status_txt = "Enabled" if enabled else "Disabled"
-        status_color= (0,0,255) if enabled else (255,0,0)
-        status = self.font.render(status_txt, True, status_color)
+        #State for my hover-based autoscroll logic
+        now = pygame.time.get_ticks()
+        self.hover_dir_ship = 0; self.next_tick_ship = now; self.hover_start_ship = None
+        self.hover_dir_bg   = 0; self.next_tick_bg   = now; self.hover_start_bg   = None
+        self.hover_dir_ob   = 0; self.next_tick_ob   = now; self.hover_start_ob   = None
 
-        pad_x, pad_y= 14,8
-        box_w = base.get_width() +status.get_width() +pad_x *2
-        box_h = max(base.get_height(), status.get_height())+ pad_y*2
-        x = (surface.get_width()-box_w)//2
-        y= surface.get_height()- box_h-12
-
-        self.copilot_rect.update(x,y, box_w, box_h)
-
-        show = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
-        pygame.draw.rect(show, (0,0,0,150), show.get_rect(), border_radius=12)
-        show.blit(base,(pad_x,pad_y))
-        show.blit(status,(pad_x+base.get_width(),pad_y))
-        surface.blit(show,(x,y))
-
-
-    def _index_from_name(self, items, name):
-        for i, (nm,_) in enumerate(items):
-            if nm == name:
-                return i
-        return 0
-
-    #Took some work but this crops the bg image to whatever screen size the system is running on
-    def _bg_preview(self, path: str, crop_w: int, crop_h: int, thumb: tuple[int, int]) -> pygame.Surface:
-
-        img = pygame.image.load(path).convert()
-
-        #Minimum height for crop
-        if img.get_height() != crop_h:
-            scale = crop_h / img.get_height()
-            img = pygame.transform.smoothscale(img, (max(1, int (img.get_width()*scale)), crop_h))
-
-        #If width than crop, tile horizontally first
-        if img.get_width() < crop_w:
-            tiled = pygame.Surface((crop_w, img.get_height())).convert()
-            x=0
-            while x < crop_w:
-                tiled.blit(img, (x,0))
-                x+= img.get_width()
-            img = tiled
-
-        x0 = max(0, (img.get_width() - crop_w) // 2)
-        y0 = max(0, (img.get_height() - crop_h) // 2)
-        crop = img.subsurface(pygame.Rect(x0, y0, crop_w, crop_h)).copy()
-
-        return pygame.transform.smoothscale(crop, thumb)
-
-    #Loads the images
-    def _load(self, path, size, alpha=True):
-        img = pygame.image.load(path).convert_alpha() if alpha else pygame.image.load(path).convert()
-        return pygame.transform.smoothscale(img, size)
-
-    #Determine sizes of rectangles and return it
-    def _row_rects_centered(self, *, count: int, box_w: int, box_h: int, y: int, gap: int, screen_w: int):
-        total_w = count * box_w + (count-1) * gap if count > 0 else 0
-        x= (screen_w - total_w) // 2
-        rects = []
-        for _ in range(count):
-            rects.append(pygame.Rect(x, y, box_w, box_h))
-            x += box_w + gap
-        return rects
-
-    def arrow_rects_for_row(self,rects, size= 100, gap=16):
-        if not rects:
-            return None, None
-        left_box= rects[0]
-        right_box= rects[-1]
-        cy = left_box.centery
-        left = pygame.Rect(left_box.left- gap-size-10, cy-size+15 // 2,size, size)
-        right = pygame.Rect(right_box.left+gap, cy-size+15 // 2,size, size)
-
-        return left, right
-
-    #Self explanatory
+    #Play my customize launch video, save the choices, then start the correct game mode
     def _save_and_start(self):
-
-        #Play my customize video
         try:
-            vid_dir= asset_path("launch_video")
-            mp4 = os.path.join(vid_dir,"customize_video.mp4")
+            mp4 = os.path.join(asset_path("launch_video"), "customize_video.mp4")
             if os.path.isfile(mp4):
-                play_video_cover(self.game.screen, mp4,cap_fps=60,fade_out_ms=220)
+                play_video_cover(self.game.screen, mp4, cap_fps=60, fade_out_ms=220)
         except Exception as e:
-            print("Customize launch skipped",e)
+            print("Customize launch skipped:", e)
 
-        #Existing save and start
         if self.ships: self.game.selected_ship = asset_path(self.ships[self.ship_idx][0])
-        if self.bgs: self.game.selected_bg = asset_path(self.bgs[self.bg_idx][0])
-        if self.obs: self.game.selected_ob = asset_path(self.obs[self.ob_idx][0])
+        if self.bgs:   self.game.selected_bg   = asset_path(self.bgs[self.bg_idx][0])
+        if self.obs:   self.game.selected_ob   = asset_path(self.obs[self.ob_idx][0])
 
         if getattr(self.game, "ai_enabled", False):
             self.game.start_ai_game()
         else:
             self.game.start_user_game()
-
         self.game.state = "play"
 
-    #Redraw my layout if window size is adjusted
-    def relayout(self,surface:pygame.Surface) -> None:
-        if surface.get_size() != self.last_side:
-            w,h = surface.get_size()
-            self.ship_rects = self._row_rects_centered(count= 3, box_w=210, box_h=110, y=130, gap=28, screen_w=w)
-            self.bg_rects = self._row_rects_centered(count= 3, box_w=300, box_h=170, y=300, gap=28, screen_w=w)
-            self.ob_rects = self._row_rects_centered(count= 3, box_w=110, box_h=250, y=528, gap=55, screen_w=w)
+    #Turn screen coordinates into design-space so the layout stays consistent in fullscreen or windowed
+    def _screen_to_design(self, screen_pos):
+        rect = letterbox_rect(self.game.screen)
+        if not rect.collidepoint(screen_pos): return None
+        sx = (screen_pos[0] - rect.x) / rect.w
+        sy = (screen_pos[1] - rect.y) / rect.h
+        return (sx * DESIGN_W, sy * DESIGN_H)
 
-            self.btn_back.rect.topleft=(30,h-70)
-            self.btn_start.rect.topright=(w-30,h-70)
+    def _try_img(self, name, size):
+        p = asset_path(name)
+        return self._load(p, size, True) if os.path.exists(p) else None
 
-            self.debug_toggle.rect.center = (w-98, 670)
+    def _index_from(self, basename, items):
+        for i,(nm,_) in enumerate(items):
+            if nm == basename: return i
+        return 0
 
-            self.position_arrows(w)
+    #Build a row of boxes centered horizontally using the layout values
+    def _row_centered(self, count, w, h, y, gap):
+        total = count*w + (count-1)*gap
+        x = (DESIGN_W - total)//2
+        return [pygame.Rect(x + i*(w+gap), y, w, h) for i in range(count)]
 
-            self.last_side= (w,h)
+    #Position the left/right arrows just outside the first and last box
+    def _arrow_rects(self, rects):
+        pad = LAYOUT["arrow_pad"]
+        cy = rects[0].centery
+        left  = pygame.Rect(rects[0].left  - pad - 72, cy - 18, 72, 36)
+        right = pygame.Rect(rects[-1].right + pad,     cy - 18, 72, 36)
+        return left, right
 
-    # Draw arrows relative to boxes
-    def position_arrows(self, screen_w: int) -> None:
-        padding = 25
+    #Took some work but this crops the bg image to whatever screen size the system is running on
+    def _bg_preview(self, path, crop_w, crop_h, thumb):
+        img = pygame.image.load(path).convert()
+        if img.get_height() != crop_h:
+            s = crop_h / img.get_height()
+            img = pygame.transform.smoothscale(img, (max(1,int(img.get_width()*s)), crop_h))
+        if img.get_width() < crop_w:
+            tiled = pygame.Surface((crop_w, img.get_height())).convert()
+            x = 0
+            while x < crop_w:
+                tiled.blit(img, (x,0))
+                x += img.get_width()
+            img = tiled
+        x0 = max(0, (img.get_width() - crop_w)//2)
+        y0 = max(0, (img.get_height()- crop_h)//2)
+        crop = img.subsurface(pygame.Rect(x0,y0,crop_w,crop_h)).copy()
+        return pygame.transform.smoothscale(crop, thumb)
 
-        if self.ship_rects:
-            row_y = self.ship_rects[0].centery
-            self.ship_left_arrow.midright = (self.ship_rects[0].left - padding, row_y+25)
-            self.ship_right_arrow.midleft = (self.ship_rects[-1].right + padding, row_y+25)
+    def _load(self, path, size, alpha=True):
+        img = pygame.image.load(path).convert_alpha() if alpha else pygame.image.load(path).convert()
+        return pygame.transform.smoothscale(img, size)
 
-        if self.bg_rects:
-            row_y = self.bg_rects[0].centery
-            self.bg_left_arrow.midright = (self.bg_rects[0].left - padding, row_y+15)
-            self.bg_right_arrow.midleft = (self.bg_rects[-1].right + padding, row_y+15)
-
-        if self.ob_rects:
-            row_y = self.ob_rects[0].centery
-            self.ob_left_arrow.midright = (self.ob_rects[0].left - padding, row_y+5)
-            self.ob_right_arrow.midleft = (self.ob_rects[-1].right + padding, row_y+5)
-
-    #Basic listener
+    #Handle hover autoscroll, AI toggle, arrows, and the basic buttons/toggles
     def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            pos = event.pos
+        pos_d = None
+        if event.type in (pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN):
+            pos_d = self._screen_to_design(pygame.mouse.get_pos())
 
-            #Infinite scroll:
+        if event.type == pygame.MOUSEMOTION and pos_d:
+            now = pygame.time.get_ticks()
 
-            #Ship rows
-            if self.ships:
-                if self.ship_left_arrow and self.ship_right_arrow.collidepoint(pos):
-                    self.ship_idx = (self.ship_idx+1) % len(self.ships)
-                elif self.ship_right_arrow and self.ship_left_arrow.collidepoint(pos):
-                    self.ship_idx = (self.ship_idx-1) % len(self.ships)
-                elif len(self.ship_rects) >= 3 and self.ship_rects[0].collidepoint(pos):
-                    self.ship_idx = (self.ship_idx+1) % len(self.ships)
-                elif len(self.ship_rects) >= 3 and self.ship_rects[2].collidepoint(pos):
-                    self.ship_idx = (self.ship_idx-1) % len(self.ships)
+            #Inner helper that figures out which side tile is being hovered and when to start scrolling
+            def upd(rects, hover_dir, hover_start):
+                new_dir = -1 if rects[0].collidepoint(pos_d) else (1 if rects[2].collidepoint(pos_d) else 0)
+                if hover_dir == 0 and new_dir != 0:
+                    hover_start = now
+                elif new_dir == 0:
+                    hover_start = None
+                return new_dir, hover_start
 
-            #BG rows
-            if self.bgs:
-                if self.bg_left_arrow and self.bg_left_arrow.collidepoint(pos):
-                    self.bg_idx = (self.bg_idx-1) % len(self.bgs)
-                elif self.bg_right_arrow and self.bg_right_arrow.collidepoint(pos):
-                    self.bg_idx = (self.bg_idx+1) % len(self.bgs)
-                elif len(self.bg_rects)>= 3 and self.bg_rects[0].collidepoint(pos):
-                    self.bg_idx = (self.bg_idx+1) % len(self.bgs)
-                elif len(self.bg_rects) >= 3 and self.bg_rects[2].collidepoint(pos):
-                    self.bg_idx = (self.bg_idx-1) % len(self.bgs)
+            self.hover_dir_ship, self.hover_start_ship = upd(self.ship_rects, self.hover_dir_ship, self.hover_start_ship)
+            self.hover_dir_bg,   self.hover_start_bg   = upd(self.bg_rects,   self.hover_dir_bg,   self.hover_start_bg)
+            self.hover_dir_ob,   self.hover_start_ob   = upd(self.ob_rects,   self.hover_dir_ob,   self.hover_start_ob)
 
-            #Obs rows
-            if self.obs:
-                if self.ob_left_arrow and self.ob_left_arrow.collidepoint(pos):
-                    self.ob_idx = (self.ob_idx-1) % len(self.obs)
-                elif self.ob_right_arrow and self.ob_right_arrow.collidepoint(pos):
-                    self.ob_idx = (self.ob_idx+1) % len(self.obs)
-                elif len(self.ob_rects)>= 3 and self.ob_rects[0].collidepoint(pos):
-                    self.ob_idx = (self.ob_idx+1) % len(self.obs)
-                elif len(self.ob_rects) >= 3 and self.ob_rects[2].collidepoint(pos):
-                    self.ob_idx = (self.ob_idx-1) % len(self.obs)
+        if pos_d and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.copilot_rect.collidepoint(pos_d):
+                self.game.ai_enabled = not bool(getattr(self.game, "ai_enabled", False))
+                return
 
-            for i, r in enumerate(self.ship_rects):
-                if i < len(self.ships) and r.collidepoint(pos): self.ship_idx = i
-            for i, b in enumerate(self.bg_rects):
-                if i < len(self.bgs) and b.collidepoint(pos): self.bg_idx = i
-            for i, o in enumerate(self.ob_rects):
-                if i < len(self.obs) and o.collidepoint(pos): self.ob_idx = i
+            if self.music_left_rect.collidepoint(pos_d):
+                if hasattr(self.game, "cycle_music"):
+                    self.game.cycle_music(-1)
+                return
 
-            if self.copilot_rect.collidepoint(pos):
-                self.game.ai_enabled = not getattr(self.game, "ai_enabled", False)
+            if self.music_right_rect.collidepoint(pos_d):
+                if hasattr(self.game, "cycle_music"):
+                    self.game.cycle_music(1)
+                return
 
-        self.music_toggle.handle_event(event)
-        self.btn_back.handle_event(event)
-        self.btn_start.handle_event(event)
-        self.debug_toggle.handle_event(event)
+        if pos_d and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if   self.ship_left_r.collidepoint(pos_d): self.ship_idx = (self.ship_idx - 1) % max(1, len(self.ships))
+            elif self.ship_right_r.collidepoint(pos_d): self.ship_idx = (self.ship_idx + 1) % max(1, len(self.ships))
+            elif self.bg_left_r.collidepoint(pos_d):   self.bg_idx   = (self.bg_idx   - 1) % max(1, len(self.bgs))
+            elif self.bg_right_r.collidepoint(pos_d):  self.bg_idx   = (self.bg_idx   + 1) % max(1, len(self.bgs))
+            elif self.ob_left_r.collidepoint(pos_d):   self.ob_idx   = (self.ob_idx   - 1) % max(1, len(self.obs))
+            elif self.ob_right_r.collidepoint(pos_d):  self.ob_idx   = (self.ob_idx   + 1) % max(1, len(self.obs))
 
-    #Draw the rows and border
-    def _draw_row(self, surface, items, rects, sel_idx):
+        if pos_d:
+            self.music_toggle.handle_event_d(event, pos_d)
+            self.debug_toggle.handle_event_d(event, pos_d)
+            self.btn_back.handle_event_d(event, pos_d)
+            self.btn_start.handle_event_d(event, pos_d)
 
-        if not items or not rects:
-            return
+    #Draw the customize layout, then letterbox the canvas to the real screen
+    def draw(self, screen: pygame.Surface) -> None:
+        self._apply_autoscroll()
 
+        c = self.canvas
+        c.fill((0,0,0))
+        if self.customize_bg: cover_blit(c, self.customize_bg); c.blit(self.overlay,(0,0))
+
+        #Helper to draw section titles with an optional underline
+        def title(txt, y, color=(255,255,255), underline=True):
+            label = self.font.render(txt, True, color)
+            c.blit(label, (DESIGN_W//2 - label.get_width()//2, y))
+            if underline:
+                y2 = y + label.get_height() + 4
+                pygame.draw.line(c, color,
+                                 (DESIGN_W//2 - label.get_width()//2, y2),
+                                 (DESIGN_W//2 + label.get_width()//2, y2), 3)
+
+        title("Welcome to Mission Control: Prepare for Launch!", LAYOUT["title_y"], (220,60,60), underline=False)
+        title("Ships",     LAYOUT["ships_title_y"])
+        title("Routes",    LAYOUT["routes_title_y"])
+        title("Obstacles", LAYOUT["obstacles_title_y"])
+
+        self._draw_row_with_png_border(c, items=self.ships, rects=self.ship_rects,  sel_idx=self.ship_idx,  cfg=LAYOUT["border_ships"])
+        self._draw_row_with_png_border(c, items=self.bgs,   rects=self.bg_rects,    sel_idx=self.bg_idx,    cfg=LAYOUT["border_routes"])
+        self._draw_row_with_png_border(c, items=self.obs,   rects=self.ob_rects,    sel_idx=self.ob_idx,    cfg=LAYOUT["border_obstacles"])
+
+        if self.arrow_left and self.arrow_right:
+            c.blit(self.arrow_left,  self.ship_left_r)
+            c.blit(self.arrow_right, self.ship_right_r)
+            c.blit(self.arrow_left,  self.bg_left_r)
+            c.blit(self.arrow_right, self.bg_right_r)
+            c.blit(self.arrow_left,  self.ob_left_r)
+            c.blit(self.arrow_right, self.ob_right_r)
+
+        music_lbl = self.font.render("Music", True, (255,255,255))
+        c.blit(music_lbl, LAYOUT["music_label"])
+        pygame.draw.line(c, (255,255,255),
+                         (LAYOUT["music_label"][0], LAYOUT["music_label"][1] + music_lbl.get_height() + 4),
+                         (LAYOUT["music_label"][0] + music_lbl.get_width(), LAYOUT["music_label"][1] + music_lbl.get_height() + 4), 3)
+
+        dbg_lbl = self.font.render("Debug", True, (255,255,255))
+        c.blit(dbg_lbl, LAYOUT["debug_label"])
+        pygame.draw.line(c, (255,255,255),
+                         (LAYOUT["debug_label"][0], LAYOUT["debug_label"][1] + dbg_lbl.get_height() + 4),
+                         (LAYOUT["debug_label"][0] + dbg_lbl.get_width(), LAYOUT["debug_label"][1] + dbg_lbl.get_height() + 4), 3)
+
+        self.music_toggle.draw_d(c)
+
+        if self.music_arrow_left:
+            c.blit(self.music_arrow_left, self.music_left_rect)
+        if self.music_arrow_right:
+            c.blit(self.music_arrow_right, self.music_right_rect)
+
+        self.draw_music_index_bar(c)
+
+        self.debug_toggle.draw_d(c)
+        self.btn_back.draw_d(c)
+        self.btn_start.draw_d(c)
+
+        self._draw_copilot_badge(c)
+
+        rect = letterbox_rect(screen)
+        frame = pygame.transform.smoothscale(c, (rect.w, rect.h))
+        screen.fill((0,0,0)); screen.blit(frame, rect.topleft)
+
+    #Draw the three rows with either the selected PNG border or the unselected one
+    def _draw_row_with_png_border(self, canvas, *, items, rects, sel_idx, cfg):
+        if not items: return
         n = len(items)
 
-        if len(rects) == 1:
-            offsets= [0]
-        elif len(rects) == 2:
-            offsets= [-1,0]
-        else: offsets= [-1,0,1]
+        pad = int(cfg.get("pad", 6))
+        dx, dy = cfg.get("offset", (0, 0))
+        un_th  = int(cfg.get("unselected_thickness", 3))
+        un_rad = int(cfg.get("unselected_radius", 12))
 
-        for rect, off in zip(rects, offsets):
+        for rect, off in zip(rects, (-1, 0, 1)):
             idx = (sel_idx + off) % n
             _, img = items[idx]
-            surface.blit(img, img.get_rect(center=rect.center))
-            color = (0,0, 255) if off == 0 else (50,50,50)
-            self._outline(surface, rect, color, 3, 10)
+            img_rect = img.get_rect(center=rect.center)
+            canvas.blit(img, img_rect)
 
-    def draw_arrows(self,surface: pygame.Surface) -> None:
-        if not (self.arrow_left_img and self.arrow_right_img):
+            frame_rect = rect.inflate(pad * 2, pad * 2).move(dx if off == 0 else 0, dy if off == 0 else 0)
+
+            if off == 0:
+                # Selected use border.png
+                if self.border_png_cropped:
+                    scaled = get_scaled_image(self.border_png_cropped,
+                                              (frame_rect.width, frame_rect.height),
+                                              key="border_cropped")
+                    canvas.blit(scaled, frame_rect.topleft)
+                elif self.border_png_raw:
+                    scaled = get_scaled_image(self.border_png_raw,
+                                              (frame_rect.width, frame_rect.height),
+                                              key="border_raw")
+                    canvas.blit(scaled, frame_rect.topleft)
+                else:
+                    pygame.draw.rect(canvas, (255,0,0), frame_rect, width=max(4, un_th+1), border_radius=max(12, un_rad))
+            else:
+                # UNselected → use border_unselected.png if present, otherwise fallback line
+                if self.border_unsel_png_cropped:
+                    scaled_u = get_scaled_image(self.border_unsel_png_cropped,
+                                                (frame_rect.width, frame_rect.height),
+                                                key="border_unsel_cropped")
+                    canvas.blit(scaled_u, frame_rect.topleft)
+                elif self.border_unsel_png_raw:
+                    scaled_u = get_scaled_image(self.border_unsel_png_raw,
+                                                (frame_rect.width, frame_rect.height),
+                                                key="border_unsel_raw")
+                    canvas.blit(scaled_u, frame_rect.topleft)
+                else:
+                    pygame.draw.rect(canvas, UNSEL_BORDER_COLOR, frame_rect, width=un_th, border_radius=un_rad)
+
+    #Clickable badge that shows if the AI copilot is enabled or disabled
+    def _draw_copilot_badge(self, canvas):
+        enabled = bool(getattr(self.game, "ai_enabled", False))
+        base = self.font.render("AI Copilot: ", True, (255,255,255))
+        status = self.font.render("Enabled" if enabled else "Disabled",
+                                  True, (0,0,255) if enabled else (255,0,0))
+        pad_x, pad_y = 14, 8
+        box_w = base.get_width() + status.get_width() + pad_x*2
+        box_h = max(base.get_height(), status.get_height()) + pad_y*2
+        x = DESIGN_W//2 - box_w//2
+        y = DESIGN_H - LAYOUT["ai_margin_bottom"] - box_h
+        self.copilot_rect = pygame.Rect(x, y, box_w, box_h)
+        panel = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        pygame.draw.rect(panel, (0,0,0,150), panel.get_rect(), border_radius=12)
+        panel.blit(base, (pad_x, pad_y))
+        panel.blit(status, (pad_x + base.get_width(), pad_y))
+        canvas.blit(panel, (x, y))
+
+    def draw_music_index_bar(self, canvas: pygame.Surface) -> None:
+        if not getattr(self, "music_slot_rects", None):
             return
 
-        if self.ships:
-            surface.blit(self.arrow_left_img, self.ship_left_arrow)
-            surface.blit(self.arrow_right_img, self.ship_right_arrow)
-
-        if self.bgs:
-            surface.blit(self.arrow_left_img, self.bg_left_arrow)
-            surface.blit(self.arrow_right_img, self.bg_right_arrow)
-
-        if self.obs:
-            surface.blit(self.arrow_left_img, self.ob_left_arrow)
-            surface.blit(self.arrow_right_img, self.ob_right_arrow)
-
-    #Draw rest of my customization menu
-    def draw(self, surface:pygame.Surface) -> None:
-
-        #Draw background
-        if self.customize_bg:
-            cover_blit(surface, self.customize_bg)
-            if(self.customize_overlay is None) or (self.customize_overlay.get_size() != surface.get_size()):
-                self.customize_overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
-                self.customize_overlay.fill((0,0,0,120))
-            surface.blit(self.customize_overlay, (0,0))
+        tracks = getattr(self.game, "music_tracks", [])
+        if not tracks:
+            return
+        active = getattr(self.game, "current_music_index", 2)
+        if len(tracks) > 0:
+            active %= len(tracks)
         else:
-            surface.fill(pygame.Color("black"))
+            active = 0
 
+        for i, rect in enumerate(self.music_slot_rects):
+            if i >= len(tracks):
+                border_color = (90, 10, 10)
+                pygame.draw.rect(canvas, border_color, rect, width=2)
+                continue
 
-        #Protect my layout after any resizing
-        self.relayout(surface)
+            is_active = (i== active)
 
-        def title(txt:str, y: int, color=(255,255,255), underline= True, center: bool = True):
-            label = self.font.render(txt, True, color)
-            if center:
-                rect = label.get_rect(midtop=(surface.get_width()//2, y))
+            if not is_active:
+                border_color = (180, 40, 40)
+                pygame.draw.rect(canvas, border_color, rect, width=2)
+
             else:
-                rect = label.get_rect(topleft=(50, y))
-            surface.blit(label, rect)
+                #Glow
+                glow_color = (180, 20, 20)
+                inner_color = (255, 0, 0)
 
-            if underline:
-                pygame.draw.line(surface, color, (rect.left, rect.bottom + 4), (rect.right, rect.bottom + 4), 3)
+                glow_rect= rect.inflate(14, 14)
+                glow_surface = pygame.Surface(glow_rect.size, pygame.SRCALPHA)
+                pygame.draw.rect(glow_surface, (*glow_color,80), glow_surface.get_rect())
+                canvas.blit(glow_surface, glow_rect.topleft)
 
-        title("Welcome to Mission Control: Prepare for Launch!", 30, (220, 60, 60),underline=False,center=True)
-        title("Ships", 85, (255,255,255), underline=True, center=True)
-        title("Routes", 256, underline= True, center=True)
-        title("Obstacles", 484, underline= True, center=True)
-        title("Music", 590, underline= True, center=False)
+                pygame.draw.rect(canvas, glow_color, rect.inflate(6,6), width=3)
+                pygame.draw.rect(canvas, inner_color, rect, width=2)
 
-        self._draw_row(surface, self.ships, self.ship_rects, self.ship_idx)
-        self._draw_row(surface, self.bgs, self.bg_rects, self.bg_idx)
-        self._draw_row(surface, self.obs, self.ob_rects, self.ob_idx)
+    #Hover on the side tiles for a bit, then step through that row automatically
+    def _apply_autoscroll(self):
+        now = pygame.time.get_ticks()
 
-        self.draw_arrows(surface)
+        def maybe_advance(dir_val, start_ms, next_ms, idx, length):
+            if dir_val == 0 or length == 0:
+                return next_ms, idx
+            if start_ms is None or (now - start_ms) < HOVER_DWELL_MS:
+                return now + AUTOSCROLL_MS, idx
+            if now >= next_ms:
+                idx = (idx + dir_val) % length
+                next_ms = now + AUTOSCROLL_MS
+            return next_ms, idx
 
-        self.music_toggle.draw(surface)
-        self.btn_back.draw(surface)
-        self.btn_start.draw(surface)
-
-        #Debug
-        dbg_lbl = self.font.render("Debug", True, (255,255,255))
-        dbg_x = surface.get_width() - dbg_lbl.get_width()-50
-        dbg_y= 590
-        surface.blit(dbg_lbl, (dbg_x, dbg_y))
-        pygame.draw.line(surface, (255,255,255),(dbg_x, dbg_y+dbg_lbl.get_height()+4),(dbg_x+ dbg_lbl.get_width(), dbg_y+dbg_lbl.get_height()+4), 3)
-        self.debug_toggle.draw(surface)
-
-        self.draw_copilot_label(surface)
-
-
-    def _outline(self, surface, rect, color=(255,215,0), w=3, radius=8):
-        pygame.draw.rect(surface, color, rect, width= w, border_radius=radius)
+        if self.ships:
+            self.next_tick_ship, self.ship_idx = maybe_advance(self.hover_dir_ship, self.hover_start_ship,
+                                                               self.next_tick_ship, self.ship_idx, len(self.ships))
+        if self.bgs:
+            self.next_tick_bg, self.bg_idx = maybe_advance(self.hover_dir_bg, self.hover_start_bg,
+                                                           self.next_tick_bg, self.bg_idx, len(self.bgs))
+        if self.obs:
+            self.next_tick_ob, self.ob_idx = maybe_advance(self.hover_dir_ob, self.hover_start_ob,
+                                                           self.next_tick_ob, self.ob_idx, len(self.obs))

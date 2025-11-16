@@ -10,9 +10,6 @@ import pygame
 from typing import List, Optional
 import os
 
-from pygame import surface
-from pygame.draw_py import draw_line
-
 os.environ.setdefault("SDL_VIDEO_CENTERED", "1")
 from launch_video import play_video_cover, play_video_sequence_cover
 
@@ -28,7 +25,7 @@ AI_DIR= os.path.abspath(os.path.join(BASE_DIR, "..", "The AI Files"))
 if AI_DIR not in sys.path:
     sys.path.insert(0,AI_DIR)
 
-from autopilot_torch import TorchPolicy #Ignore warning goes away at compile time only shows error because i have my files separated into different directory's for neatness
+from autopilot_torch import TorchPolicy
 
 #Sound effects
 pygame.mixer.pre_init(44100, -16, 2, 512)
@@ -145,6 +142,8 @@ class Game:
         pygame.init()
         pygame.display.set_caption("Astro Alley")
         self.clock = pygame.time.Clock()
+
+        #Base fonts, will be rescaled later
         self.font = pygame.font.SysFont(None, 50)
         self.small_font = pygame.font.SysFont(None, 36)
         self.leaderboard_font = pygame.font.SysFont(None, 50)
@@ -152,7 +151,17 @@ class Game:
 
         #Play music
         self._music_paused = False
-        self.start_music(volume=.15)
+        self.music_volume=.15
+
+        #Build my playlist
+        self.music_tracks=[]
+        for name in ["backgroundmusic.mp3", "backgroundmusic1.mp3", "backgroundmusic2.mp3", "backgroundmusic3.mp3", "backgroundmusic4.mp3"]:
+            p= sound_path(name)
+            if os.path.isfile(p):
+                self.music_tracks.append(p)
+
+        self.current_music_index = 2
+        self.start_music(volume=self.music_volume)
 
         #Launch Screen
         self.custom_window_size(fullscreen=True)
@@ -174,11 +183,10 @@ class Game:
             print("Intro skipped", e)
 
         #Graph for training model
-        graph_h = 333
-        self.graph_h =graph_h
+        self.graph_h = 333
 
         #Fixed virtual resolution
-        self.virtual_size = (SCREEN_WIDTH, SCREEN_HEIGHT+ graph_h)
+        self.virtual_size = (SCREEN_WIDTH, SCREEN_HEIGHT+ self.graph_h)
 
         self.canvas= pygame.Surface(self.virtual_size).convert()
 
@@ -196,9 +204,9 @@ class Game:
 
         here= os.path.dirname(__file__)
         assets= os.path.join(here, "assets")
-        self.selected_ship = os. path.join(assets, "ship.png")
+        self.selected_ship = os.path.join(assets, "ship.png")
         self.selected_bg = os.path.join(assets, "strip_background.png")
-        self.selected_ob = os. path.join(assets, "obstacle.png")
+        self.selected_ob = os.path.join(assets, "obstacle.png")
         self.policy_path = os.path.join(AI_DIR, "autopilot_policy.pt")
         self.autopilot=None
         self.customize = CustomizeMenu(self)
@@ -291,7 +299,9 @@ class Game:
 
         if pygame.mixer.get_init():
             v = pygame.mixer.music.get_volume()
-            pygame.mixer.music.set_volume(max(0.0, min(1.0,v+delta)))
+            v = max(0.0, min(1.0,v+delta))
+            pygame.mixer.music.set_volume(v)
+            self.music_volume = v
 
     def toggle_music(self)-> None:
         if not pygame.mixer.get_init():
@@ -808,18 +818,37 @@ class Game:
     def start_music(self, volume):
         # Music
         self._music_paused = False
+        self.music_volume = volume
+
         try:
             if not pygame.mixer.get_init():
                 pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
                 pygame.mixer.set_num_channels(8)
 
-            if not pygame.mixer.music.get_busy():
-                opensource_music_file = sound_path("backgroundmusic.mp3")
-                if os.path.isfile(opensource_music_file):
-                    pygame.mixer.music.load(opensource_music_file)
-                    pygame.mixer.music.set_volume(volume)
-                    pygame.mixer.music.play(-1, fade_ms=1200)
+            track_path=None
+            tracks = getattr(self, "music_tracks", None)
+            if tracks:
+                if not hasattr(self, "current_music_index"):
+                    self.current_music_index = 0
+                if len(tracks) > 0:
+                    track_path = tracks[self.current_music_index % len(tracks)]
+
+            if not track_path:
+                track_path = sound_path("backgroundmusic.mp3")
+
+            if os.path.isfile(track_path):
+                pygame.mixer.music.load(track_path)
+                pygame.mixer.music.set_volume(self.music_volume)
+                pygame.mixer.music.play(-1, fade_ms=1200)
+
             self.music_paused = False
         except Exception as e:
             print("Audio Disabled: ", e)
             self._music_paused = True
+
+    def cycle_music(self, direction:int) -> None:
+        tracks = getattr(self, "music_tracks", None)
+        if not tracks or len(tracks) == 0:
+            return
+        self.current_music_index = (self.current_music_index + direction) % len(tracks)
+        self.start_music(getattr(self, "music_volume", .15))

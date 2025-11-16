@@ -198,3 +198,4 @@ def play_video_sequence_cover(
 
         #Reuse same video player
         play_video_cover(screen, path, duration_limit=limit, skip_keys=skip_keys ,cap_fps=cap_fps, fade_out_ms=fade_ms, launch_sfx_name=sfx, launch_sfx_volume=vol,)
+
