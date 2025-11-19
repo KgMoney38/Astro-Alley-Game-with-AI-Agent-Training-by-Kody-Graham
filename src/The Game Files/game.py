@@ -209,7 +209,11 @@ class Game:
         self.selected_ob = os.path.join(assets, "obstacle.png")
         self.policy_path = os.path.join(AI_DIR, "autopilot_policy.pt")
         self.autopilot=None
-        self.customize = CustomizeMenu(self)
+        self.customize = None
+        self.customize_loading = False
+
+        if self.is_fullscreen:
+            self.set_fullscreen(True)
 
         #For AI
         self.ai_restart_timer= None
@@ -264,7 +268,9 @@ class Game:
 
 
     def open_customize(self):
-        self.state = "customize"# change later
+        if self.customize is None and not getattr(self, "customize_loading", False):
+            self.customize = CustomizeMenu(self)
+        self.state = "customize"
 
     def quit(self):
         self.running = False
@@ -360,8 +366,17 @@ class Game:
                         self.running = False
                     else:
                         self.menu.handle_event(event)
+
+                if self.customize is None and not self.customize_loading:
+                    self.customize_loading = True
+
                 self.menu.draw(self.screen)
                 pygame.display.flip()
+
+                if self.customize is None and self.customize_loading:
+                    self.customize = CustomizeMenu(self)
+                    self.customize_loading = False
+
                 continue
 
             if self.state == "customize":
@@ -423,15 +438,19 @@ class Game:
 
     #Function to set the full screen mode properly
     def set_fullscreen(self, on: bool) -> None:
+
+        already_mode = (on == getattr(self, "is_fullscreen", False)) and (self.screen is not None)
+
         self.is_fullscreen = on
 
-        if on:
-            pygame.display.quit()
-            pygame.display.init()
-            self.screen = pygame.display.set_mode((0, 0), pygame.NOFRAME| pygame.DOUBLEBUF)
+        if not already_mode:
+            if on:
+                pygame.display.quit()
+                pygame.display.init()
+                self.screen = pygame.display.set_mode((0, 0), pygame.NOFRAME| pygame.DOUBLEBUF)
 
-        else:
-            self.screen = pygame.display.set_mode((1280,720), pygame.RESIZABLE |pygame.DOUBLEBUF)
+            else:
+                self.screen = pygame.display.set_mode((1280,720), pygame.RESIZABLE |pygame.DOUBLEBUF)
 
         #Timer for press esc hint
         now= pygame.time.get_ticks()
@@ -652,22 +671,22 @@ class Game:
             if self.user_high_score > self.ai_high_score:
                 #User best
                 user_surface = self.small_font.render(f"User: {self.user_high_score}", True, (255,0,0))
-                user_y = all_y - user_surface.get_height() -248
+                user_y = all_y - user_surface.get_height() -238
                 s.blit(user_surface, (cx - user_surface.get_width() // 2, user_y))
 
                 #AI High
                 ai_surface = self.small_font.render(f"AI-Trained Agent: {self.ai_high_score}", True, (0,0,255))
-                ai_y= all_y - ath_surface.get_height() -195
+                ai_y= all_y - ath_surface.get_height() -210
                 s.blit(ai_surface, (cx - ai_surface.get_width() // 2, ai_y))
             else:
                 # User best
                 user_surface = self.small_font.render(f"User: {self.user_high_score}", True, (0, 0, 255))
-                user_y = all_y - user_surface.get_height() - 195
+                user_y = all_y - user_surface.get_height() - 210
                 s.blit(user_surface, (cx - user_surface.get_width() // 2, user_y))
 
                 # AI High
                 ai_surface = self.small_font.render(f"AI-Trained Agent: {self.ai_high_score}", True, (255, 0, 0))
-                ai_y = all_y - ath_surface.get_height() - 248
+                ai_y = all_y - ath_surface.get_height() - 238
                 s.blit(ai_surface, (cx - ai_surface.get_width() // 2, ai_y))
 
             #AI auto restart

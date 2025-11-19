@@ -8,18 +8,15 @@
 from __future__ import annotations
 import os, math, copy
 import sys
-from collections import deque
 import time
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from matplotlib import ticker
 from matplotlib.collections import LineCollection
 from matplotlib.ticker import MaxNLocator, FormatStrFormatter
 from torch.distributions.categorical import Categorical
-from torch.nn.parallel.comm import scatter
 
 from game_env import GameEnv
 
@@ -30,13 +27,15 @@ try:
 except ImportError:
     HAVE_MSVCRT = False
 
-#Model, network shared body: policy head and value head
+#Model, network shared body: policy head and value head, changed my 2 x128 tanh MLP to a 3x256
 class ActorCritic(nn.Module):
-    def __init__(self, obs_dim: int =5, hidden: int=128, act_dim: int =2):
+    def __init__(self, obs_dim: int =7, hidden: int=256, act_dim: int =2):
         super().__init__() #Initialize nn module
         self.body = nn.Sequential( #Extract shared features
             nn.Linear(obs_dim, hidden), nn.Tanh(), #First linear layer maps the obs to hidden
-            nn.Linear(hidden, hidden), nn.Tanh(), #Second hidden layer
+            nn.Linear(hidden, hidden), nn.Tanh(), #Second layer
+            nn.Linear(hidden, hidden), nn.Tanh(),  #Third layer
+
         )
         self.pi = nn.Linear(hidden, act_dim) #Policy head
         self.v = nn.Linear(hidden, 1) #Value head
@@ -84,10 +83,17 @@ def batchify(bs: int, *arrays):
         j = idx[start:start+bs]
         yield tuple(a[j] for a in arrays) #Yield aligned mini batches across input arrays
 
-#Evaluate current policy greedily
-def evaluate_policy(model: ActorCritic, device, episodes: int=25):
+def batchify_torch(bs: int, *tensors: torch.Tensor):
+    n= tensors[0].shape[0]
+    idx = torch.randperm(n, device= tensors[0].device)
+    for start in range(0, n, bs):
+        j = idx[start:start+bs]
+        yield tuple(t.index_select(0, j) for t in tensors)
 
-    env = GameEnv()
+#Evaluate current policy greedily
+def evaluate_policy(model: ActorCritic, device, episodes: int=40):
+
+    env = GameEnv(domain_randomize=False)
     model.eval()
 
     total_len =0.0
@@ -99,8 +105,9 @@ def evaluate_policy(model: ActorCritic, device, episodes: int=25):
         ep_pipes = 0
 
         while True: #Run until termination or truncation
-            x= torch.tensor(obs,dtype=torch.float32, device=device).unsqueeze(0) #Convert obj to tensor
-            logits, _ = model(x)
+            with torch.inference_mode():
+                x= torch.tensor(obs,dtype=torch.float32, device=device).unsqueeze(0) #Convert obj to tensor
+                logits, _ = model(x)
             act = int(torch.argmax(logits, dim=1).item())
             obs, r, terminated, truncated, info = env.step(act)
 
@@ -135,10 +142,17 @@ def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") #Gpu if available
     env= GameEnv() #Instantiate the environment
 
-    observation_dim, action_dim =5,2
+    observation_dim, action_dim = env.obs_dim, 2
 
     #Build AC model and move to device
-    model = ActorCritic(obs_dim=observation_dim, hidden=128, act_dim=action_dim).to(device)
+    model = ActorCritic(obs_dim=observation_dim, hidden=256, act_dim=action_dim).to(device)
+
+    import copy
+    INFER_ON_CPU = True
+    if INFER_ON_CPU:
+        model_rollout = copy.deepcopy(model).to("cpu").eval()
+    else:
+        model_rollout = model
 
     #Training graphs
     plt.ion()
@@ -300,17 +314,17 @@ def train():
 
     #Defaults for my PPO setup
     total_updates=100000
-    steps_per_roll = 4096
-    mini_batch_size = 512
-    ppo_epochs = 5
+    steps_per_roll = 8192
+    mini_batch_size = 1024
+    ppo_epochs = 6
 
     initial_lr = 3e-4 #lr = learning rate, throughout my class
     final_lr = 3e-5
 
-    clip_eps = 0.2
+    clip_eps = 0.15
     vf_coef = 0.5
-    entropy_coef_start = 0.02
-    entropy_coef_end = .002
+    entropy_coef_start = 0.012
+    entropy_coef_end = .001
     target_kl= .02 #kl= divergence for early stop, also throughout class
     max_grad_norm = 0.7
 
@@ -322,7 +336,7 @@ def train():
 
     print("****** Stop the program at anytime and the best policy so far will be saved and training will end. ******")
     print("****** Note: Each update = 100 Episodes. ******")
-    print("****** Press 'Q' to stop training and save best model. ******")
+    print("****** Press 'Q' to stop training and save best model. Note: Focus must be in the graph window******")
 
     #History for graph
     updates_hist: list[int] = []
@@ -335,7 +349,8 @@ def train():
     last_eval_len = 0.0
     last_eval_pipes = 0.0
 
-    EVAL_INTERVAL = 10
+    EVAL_INTERVAL = 20
+    EVAL_EPISODES = 40
     MAX_POINTS = 300
 
     start_time = time.time()
@@ -386,8 +401,9 @@ def train():
                     if step % 256 == 0:
                         ui_poll()
 
-                    x = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0) #MAke batch
-                    logits, value = model(x) #Pass forward
+                    with torch.inference_mode():
+                        x= torch.tensor(obs, dtype= torch.float32, device=("cpu" if INFER_ON_CPU else device)).unsqueeze(0)
+                        logits, value = model_rollout(x) #Pass forward
                     dist = Categorical(logits=logits) #Distribution over actions
                     action = dist.sample()
                     logp = dist.log_prob(action) #Logrithmic probability of sampled action
@@ -424,12 +440,12 @@ def train():
                     last_val=0.0
 
             #Convert buffers to tensor on device
-            obs_t = torch.tensor(np.array(obs_buf), dtype=torch.float32, device=device)
-            act_t =torch.tensor(np.array(act_buf), dtype=torch.int64, device=device)
-            old_logp_t= torch.tensor(np.array(logp_buf), dtype=torch.float32, device=device)
-            reward_t= torch.tensor(np.array(reward_buf), dtype=torch.float32, device=device)
-            done_t= torch.tensor(np.array(done_buf), dtype=torch.float32, device=device)
-            val_t =torch.tensor(np.array(val_buf), dtype=torch.float32, device=device)
+            obs_t = torch.as_tensor(obs_buf, dtype=torch.float32, device=device)
+            act_t =torch.as_tensor(act_buf, dtype=torch.int64, device=device)
+            old_logp_t= torch.as_tensor(logp_buf, dtype=torch.float32, device=device)
+            reward_t= torch.as_tensor(reward_buf, dtype=torch.float32, device=device)
+            done_t= torch.as_tensor(done_buf, dtype=torch.float32, device=device)
+            val_t =torch.as_tensor(val_buf, dtype=torch.float32, device=device)
 
             #Compute GAE returns and advantages
             adv_t, ret_t = gae_return(reward_t, val_t, done_t, gamma=.99, lam=.95, last_val=last_val,)
@@ -442,11 +458,8 @@ def train():
                 #Loop over mini batches
                 mb_counter=0
 
-                for (b_obs, b_act, b_old_logp, b_adv, b_ret, b_val_old,) \
-                        in batchify(mini_batch_size, obs_t.cpu().numpy(),
-                                    act_t.cpu().numpy(), old_logp_t.cpu().numpy(),
-                                    adv_t.cpu().numpy(), ret_t.cpu().numpy(),
-                                    val_t.cpu().numpy()): #Draw mini batches
+                for (b_obs, b_act, b_old_logp, b_adv, b_ret, b_val_old,) in batchify_torch(
+                        mini_batch_size, obs_t,act_t, old_logp_t,adv_t, ret_t,val_t): #Draw mini batches
 
                     mb_counter+=1
 
@@ -461,12 +474,12 @@ def train():
                         ui_poll()
 
                     #Convert mini batch nack to tensor on device
-                    b_obs = torch.tensor(b_obs, dtype=torch.float32, device=device)
-                    b_act = torch.tensor(b_act, dtype=torch.int64, device=device)
-                    b_old_logp = torch.tensor(b_old_logp, dtype=torch.float32, device=device)
-                    b_adv = torch.tensor(b_adv, dtype=torch.float32, device=device)
-                    b_ret = torch.tensor(b_ret, dtype=torch.float32, device=device)
-                    b_val_old = torch.tensor(b_val_old, dtype=torch.float32, device=device)
+                    #b_obs = torch.tensor(b_obs, dtype=torch.float32, device=device)
+                    #b_act = torch.tensor(b_act, dtype=torch.int64, device=device)
+                    #b_old_logp = torch.tensor(b_old_logp, dtype=torch.float32, device=device)
+                    #b_adv = torch.tensor(b_adv, dtype=torch.float32, device=device)
+                    #b_ret = torch.tensor(b_ret, dtype=torch.float32, device=device)
+                    #b_val_old = torch.tensor(b_val_old, dtype=torch.float32, device=device)
 
                     logits, value = model(b_obs) #Forward
                     dist = Categorical(logits=logits) #My policy distribution
@@ -503,13 +516,17 @@ def train():
                 if kl_exceeded:
                     break
 
+            if INFER_ON_CPU:
+                model_rollout.load_state_dict(model.state_dict())
+                model_rollout.eval()
+
             avg_len = float(np.mean(ep_lens)) if ep_lens else 0.0 #Average episode len across rollout
             avg_ret = float(np.mean(ep_rets)) if ep_rets else 0.0 #Average episode return across rollout
 
             #Display statistics per update and per 10 updates
             do_eval = (update % EVAL_INTERVAL == 0)
             if do_eval:
-                eval_len, eval_pipes = evaluate_policy(model, device, episodes=100) #Episodes is per update
+                eval_len, eval_pipes = evaluate_policy(model, device, episodes=EVAL_EPISODES) #Episodes is per update
                 last_eval_len = eval_len
                 last_eval_pipes = eval_pipes
 
@@ -546,7 +563,7 @@ def train():
                       f"| ent = {ent_coef:.4f} | learning_rate_now = {learning_rate_now:.6f} "
                       f"| eval_length = {last_eval_len:6.1f} | eval_pipes = {last_eval_pipes:5.2f} ")
             else:
-                print(f"Update #: {update:05d} | Elapsed: {format_elapsed(elapsed)}] "
+                print(f"[Update #: {update:05d} | Elapsed: {format_elapsed(elapsed)}] "
                       f"train_length = {avg_len:6.1f} | train_return = {avg_ret:+.2f} "
                       f"| ent = {ent_coef:.4f} | learning_rate_now = {learning_rate_now:.6f} ")
 
@@ -601,6 +618,3 @@ if __name__ == "__main__":
         sys.exit(0)
 
     train()
-
-
-

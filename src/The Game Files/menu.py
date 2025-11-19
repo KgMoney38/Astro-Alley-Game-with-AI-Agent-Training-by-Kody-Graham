@@ -10,8 +10,8 @@ from launch_video import play_video_cover
 
 #Design-space resolution so the layout scales cleanly on any screen
 DESIGN_W, DESIGN_H = 1280, 720
-AUTOSCROLL_MS  = 1000
-HOVER_DWELL_MS = 1000
+AUTOSCROLL_MS  = 800
+HOVER_DWELL_MS = 333
 SHIFT_UP = 100
 
 UNSEL_BORDER_COLOR = (40, 40, 40)
@@ -178,9 +178,21 @@ class MainMenu:
         c.fill((0,0,0))
         if self.raw_bg: cover_blit(c, self.raw_bg); c.blit(self.overlay, (0,0))
         for b in self.buttons: b.draw_d(c)
+
+        if getattr(self.game, "customize_loading", False):
+            exit_rect = self.buttons[-1].rect_d
+            label = self.game.font.render("Loading Game Files...", True, (255,0,0))
+            label_rect = label.get_rect(center=(exit_rect.centerx, exit_rect.bottom -425))
+
+            c.blit(label, label_rect)
+
+            underline_y = label_rect.bottom+ 4
+            pygame.draw.line(c, (0,0,255), (label_rect.left, underline_y), (label_rect.right, underline_y), 3)
+
         rect = letterbox_rect(screen)
         frame = pygame.transform.smoothscale(c, (rect.w, rect.h))
-        screen.fill((0,0,0)); screen.blit(frame, rect.topleft)
+        screen.fill((0,0,0))
+        screen.blit(frame, rect.topleft)
         self.game.draw_fullscreen_hint(screen)
 
 #Class for my customization menu

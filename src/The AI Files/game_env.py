@@ -42,22 +42,25 @@ class GameEnv:
             height: int = SCREEN_HEIGHT,
             pipe_speed: int= PIPE_SPEED,
             pipe_width: int =PIPE_WIDTH,
-            gap: int = max(40, PIPE_GAP-20),
+            gap: int = PIPE_GAP,
             pipe_dx: int = 360,
             gravity: float = 0.5,
             jump_impulse: float=-10.0,
             terminate_on_impact: bool = True,
-            max_steps: int = 5000,
+            max_steps: int = 500000,
+            domain_randomize: bool = True,
 
 
             #Rewards
-            pass_reward: float= 10.0,
+            pass_reward: float= 15.0,
             crash_penalty: float = -10.0,
             step_reward: float = .010,
-            jump_penalty: float = .000,
-            shaping_scale: float = .06,
+            jump_penalty: float = .0015,
+            shaping_scale: float = .010,
             shaping_max_dx: float = 260.0,
+            min_jump_interval: int = 6,
     ):
+        self.obs_dim = 7
         self.width = int(width)
         self.height = int(height)
         self.pipe_speed = float(pipe_speed)
@@ -68,6 +71,7 @@ class GameEnv:
         self.jump_impulse = float(jump_impulse)
         self.terminate_on_impact = bool(terminate_on_impact)
         self.max_steps = int(max_steps)
+        self.domain_randomize = domain_randomize
 
         self.pass_reward = float(pass_reward)
         self.crash_penalty = float(crash_penalty)
@@ -75,6 +79,8 @@ class GameEnv:
         self.jump_penalty = float(jump_penalty)
         self.shaping_scale = float(shaping_scale)
         self.shaping_max_dx = float(shaping_max_dx)
+        self.min_jump_interval = int(min_jump_interval)
+        self.jump_cd = 0 #Jump cooldown
 
         #My agent state
         self.px = int(self.width *.10) #Fixed pilot x like in the real game
@@ -90,10 +96,21 @@ class GameEnv:
         if seed is not None: #To help determine a final seed value later
             self.rng = random.Random(int(seed))
 
+        if self.domain_randomize:
+            self.gravity = float(self.rng.uniform(.45,.55))
+            self.jump_impulse = float(self.rng.uniform(-10.5,-9.5))
+        else:
+            self.gravity = float(self.rng.uniform(.45, .55))
+            self.jump_impulse = float(self.rng.uniform(-10.5, -9.5))
+
+        self.gap = int(PIPE_GAP)
+        self.pipe_dx = int(360)
+
         self.py = self.height * .5 #Start y position center everytime
         self.vy = 0.0
         self.steps = 0 #Step counter
         self.pipes.clear()
+        self.jump_cd = 0
 
         cy, gh = self.rand_gap()
         first_x = float(self.width) #Set random gap for first pipe
@@ -108,10 +125,18 @@ class GameEnv:
     def step(self, action: int):
         # Action 0=no jump, 1=jump
         self.steps += 1
+        reward = 0.0
 
-        #Apply autopilot action
-        if int(action) == 1:
+        if self.jump_cd > 0:
+            self.jump_cd -= 1
+
+        did_jump = False
+        if int(action) ==1 and self.jump_cd == 0:
             self.vy = self.jump_impulse
+            self.jump_cd = self.min_jump_interval
+            did_jump = True
+        elif int(action) ==1:
+            reward -= self.jump_penalty *.5
 
         #G
         self.vy += self.gravity
@@ -137,8 +162,6 @@ class GameEnv:
         #Delete off screen pipes
         self.pipes = [ pipe for pipe in self.pipes if pipe.x +pipe.width > 0 ]
 
-        #Compute the reward and termination
-        reward = 0.0 #No reward to start
         terminated = False
         truncated = False #Time limit check for max_steps in an episode
 
@@ -183,16 +206,21 @@ class GameEnv:
                 w= math.exp(-dx/self.shaping_max_dx)
                 reward += self.shaping_scale * w * closeness_sq
                 edge_thresh = .6
+                centered = abs((self.py - cy) / half_gap)
+
+                if centered < .25:
+                    reward -= .006 * (abs(self.vy)/ 8.0) * (1.0 - centered) * w
+
                 if dy_norm> edge_thresh:
                     penalty = (dy_norm-edge_thresh)**2
-                    reward -= .06*w* penalty
+                    reward -= .04 * w * penalty
 
                 if next_p is not None and 0.0 <= dx <=self.shaping_max_dx:
                     cy = next_p.gap_y
                     half_gap = .5 * max(1.0,float(next_p.gap_h))
                     align_raw = (cy- self.py) *(-self.vy)
                     align_norm = max(-1.0, min(1.0, align_raw/ (10*half_gap)))
-                    reward += .02 * w * align_norm
+                    reward += .018 * w * align_norm
 
         #Small survival reward and small penalty to discourage spam jumping
         reward += self.step_reward
@@ -205,7 +233,9 @@ class GameEnv:
             truncated = True
 
         obs = self.get_obs() #Build next observation
-        info= {"passed": bool(passed), "collided": bool(collided),}
+        info= {"passed": bool(passed), "collided": bool(collided),
+               "hit_top": bool(hit_top), "hit_bottom": bool(hit_bottom),
+               "hit_pipe": bool(collided and not (hit_top or hit_bottom)),}
         return obs, float(reward), bool(terminated), bool(truncated), info
 
     #Helpers
@@ -216,6 +246,8 @@ class GameEnv:
         #Keep the gap all the way in the screen
         max_top =max(50, self.height-gh-50)
         top_hi = min(PIPE_MAX_TOP, max_top)
+        if PIPE_MIN_TOP > top_hi:
+            top_hi = PIPE_MIN_TOP
         top = self.rng.randint(PIPE_MIN_TOP, top_hi)
         cy = top+ gh/2.0
 
@@ -272,33 +304,56 @@ class GameEnv:
     @staticmethod
     def axis_aligned_bound_box(ax,ay, aw, ah, bx,by, bw, bh) -> bool:
         return (ax<bx +bw) and (ax+aw> bx) and (ay < by+bh) and (ay+ ah> by)
-    
-    def get_obs(self)-> np.ndarray:
-        H= float(self.height)
-        py= float(self.py)
-        vy= float(self.vy) #Velocity
-        vy_norm = max(-1.5, min(1.5, vy/ 10.0))
 
-        pipe= self.next_pipe()
-        if pipe is None:
-            return np.array([py/H, vy_norm,0.0, 0.0, self.gap/H], dtype=np.float32)
-        
-        cx= pipe.x + .5 * pipe.width
-        dx = cx - self.px
-        t2g = dx/ max(1.0,self.pipe_speed)
-        t2g_norm= max(-1.0,min(1.0, t2g/60.0))
+    def next_two_pipes_env(self, pipes, px):
+        future = [p for p in pipes if (p.x + p.width) >= px]
+        future.sort(key=lambda p: p.x)
+        p1 = future[0] if len(future) > 0 else None
+        p2 = future[1] if len(future) > 1 else None
+        return p1, p2
 
-        gap_center = pipe.gap_y
-        gap_h = float(pipe.gap_h)
-        #max_top = max(50, int(self.height - gh - 50))
-        #top = self.rng.randint(PIPE_MIN_TOP, min(PIPE_MAX_TOP, max_top))
-        gap_center_offset = (gap_center-py) / H
-        gap_h_norm= gap_h/ H
+    # Observation builder same five dimension as training, HAS TO MATCH TRAINING!
+    def make_obs(self):
+        px = float(self.px)
+        py = float(self.py)
+        vy = float(self.vy)
 
-        #[0] vertical pos normalized, [1]normalized velocity, [2] normalized time to gap center, [3] offset to gap center, [4] normal gap height
-        return np.array([py/H, vy_norm, t2g_norm, gap_center_offset, gap_h_norm], dtype=np.float32,)
-        
-        
+        py_norm = py/ float(self.height)
+
+        vy_norm = float(np.tanh(vy / 8.0))
+
+        p1, p2 = self.next_two_pipes_env(self.pipes, px)
+
+        def pipe_features(p):
+            cx = p.x + p.width *.5
+            cy = p.gap_y
+            dx = cx-px
+            half_gap = max(1.0, p.gap_h * .5)
+            t2g = float(np.tanh(dx/ 260.0))
+            center = float(np.clip((py-cy)/ half_gap, -1.0,1.0))
+            gap_norm = float(p.gap_h / self.height)
+            return t2g, center, gap_norm
+
+
+        t2g1 = 0.0
+        t2g2 = 0.0
+
+        center1 = 0.0
+        center2 = 0.0
+
+        gap1 = 0.0
+
+        if p1 is not None:
+            t2g1, center1, gap1 = pipe_features(p1)
+
+        if p2 is not None:
+            t2g2, center2, _ = pipe_features(p2)
+
+        return np.array([py_norm, vy_norm, t2g1, center1, gap1, t2g2, center2], dtype=np.float32)
+
+    def get_obs(self):
+        return self.make_obs()
+
 
 
 

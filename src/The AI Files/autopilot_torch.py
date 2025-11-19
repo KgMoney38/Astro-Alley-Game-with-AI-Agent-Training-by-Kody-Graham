@@ -23,9 +23,11 @@ from barriers import SCREEN_HEIGHT, PIPE_GAP, PIPE_WIDTH, PIPE_SPEED, PIPE_MIN_T
 
 #Model will define both policy and value
 class ActorCritic(nn.Module):
-    def __init__(self,obs_dim: int=5,hidden: int=128, act_dim: int= 2):
+    def __init__(self,obs_dim: int=7,hidden: int=256, act_dim: int= 2):
         super().__init__() #Initialize the nn.Module base class
-        self.body= nn.Sequential(nn.Linear(obs_dim,hidden),nn.Tanh(),nn.Linear(hidden,hidden), nn.Tanh(),) #MLP that feeds both the policy and value heads
+        self.body= nn.Sequential(nn.Linear(obs_dim,hidden),nn.Tanh(),
+                                 nn.Linear(hidden,hidden), nn.Tanh(),
+                                 nn.Linear(hidden,hidden), nn.Tanh(),) #MLP that feeds both the policy and value heads
         self.pi= nn.Linear(hidden,act_dim) #Policy head
         self.v= nn.Linear(hidden,1) #Value head
 
@@ -46,11 +48,15 @@ class ActorCritic(nn.Module):
 
 #Policy wrapper for game will be what my game calls to decide when to jump
 class TorchPolicy:
-    def __init__(self, ckpt_path: str | None, device:str = "cpu"):
+    def __init__(self, ckpt_path: str | None, device:str = None):
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
         self.device = torch.device(device)# or ("cuda" if torch.cuda.is_available() else "cpu")) #Try to use CUDA because using the graphics card will be more efficient
-        self.model = ActorCritic(obs_dim=5, hidden=128, act_dim=2).to(self.device)
-        self.last_obs = np.zeros(5, dtype=np.float32)
+        torch.set_grad_enabled(False)
+        self.model = ActorCritic(obs_dim=7, hidden=256, act_dim=2).to(self.device)
         loaded= False
+        self.cooldown = 0
 
         #Check weights loaded right
         if ckpt_path and os.path.isfile(ckpt_path):
@@ -65,8 +71,7 @@ class TorchPolicy:
                 print(f"Failed to load policy from {ckpt_path}: {e}")
 
         if not loaded:
-            print("WARNING: No policy found using random weights")
-
+            raise FileNotFoundError(f"{ckpt_path} not found")
         self.model.eval()
 
     @staticmethod
@@ -86,7 +91,6 @@ class TorchPolicy:
         for p in pipes:
             if not hasattr(p, "rects"):
                 continue
-            top_rect, bot_rect = p.rects()
             pipe_right = float(p.x) + float(p.width)
             dx = pipe_right-player_left
 
@@ -96,65 +100,67 @@ class TorchPolicy:
                 best_dx = dx
         return best
 
+    def next_two_pipes(self, pipes, px):
+        future = [p for p in pipes if (p.x + p.width) >= px]
+        future.sort(key=lambda p: p.x)
+        p1 = future[0] if len(future) > 0 else None
+        p2 = future[1] if len(future) > 1 else None
+        return p1, p2
+
     #Observation builder same five dimension as training, HAS TO MATCH TRAINING!
-    def make_obs(self, player, pipes, screen_height: int) -> np.ndarray:
+    def make_obs(self, player, pipes, screen_height: int, pipe_speed = 4.0) -> np.ndarray:
+        px= player.get_rect().centerx
+        py = player.get_rect().centery
+        vy = getattr(player, "vel_y", getattr(player, "vy", 0.0))
 
-        H = float(screen_height or SCREEN_HEIGHT)
-        prect = self.player_rect(player) #Again my player rect just from game object
-        py = float(prect.centery) #Center y
+        py_norm = float(py/ float(screen_height))
 
-        # Read vertical velocity
-        vy= float(getattr(player, "vel_y", 0.0))
-        vy_norm = max(-1.5, min(1.5, vy/ 10.0)) #Normalize
+        vy_norm = float(np.tanh(vy/8.0))
 
-        #Find next pipe
-        p= self.next_pipe(player,pipes)
+        p1, p2 = self.next_two_pipes(pipes, px)
 
-        #Reset edge if no pipe
-        if p is None:
-            gap_h= float(PIPE_GAP)
-            obs = np.array([py/H, vy_norm, 0.0, 0.0, gap_h/ H], dtype=np.float32)
-            self.last_obs = obs
-            return obs
+        t2g1 = 0.0
+        t2g2 = 0.0
 
-        #Derive the gap center/height
-        top_rect, bottom_rect = p.rects()
-        gap_top= float(top_rect.bottom)
-        gap_bot = float(bottom_rect.top)
-        gap_h = gap_bot - gap_top
+        center1 = 0.0
+        center2 = 0.0
 
-        #Fall back to last obs
-        if gap_h <= 1.0:
-            return self.last_obs
+        gap1=0.0
 
-        gap_center= .5 * (gap_top + gap_bot)
+        def pipe_features(p):
+            cx = p.x + p.width *.5
+            cy = p.top_height + p.gap * .5
+            dx=cx-px
+            half_gap = max(1.0, p.gap * .5)
 
-        #Pipe/player center x
-        cx= float(p.x) + .5* float(p.width)
-        px= float(prect.centerx)
-        dx= cx-px
+            t2g= float(np.tanh(dx/260.0))
+            center = float(np.clip((py-cy) / half_gap, -1.0, 1.0))
+            return t2g, center, float(p.gap/ screen_height)
 
-        t2g = dx / max(1.0, float(PIPE_SPEED))
-        t2g_norm = max(-1.0, min(1.0, t2g/60.0))
+        if p1 is not None:
+            t2g1, center1, gap1 = pipe_features(p1)
 
-        #Vertical offset to gap center, normalize gap size
-        gap_center_offset = (gap_center - py)/H
-        gap_h_norm= gap_h / H
+        if p2 is not None:
+            t2g2, center2, _ = pipe_features(p2)
 
-        obs= np.array([py/H, vy_norm, t2g_norm, gap_center_offset, gap_h_norm], dtype=np.float32)
+        return np.array([py_norm, vy_norm, t2g1, center1, gap1, t2g2, center2], dtype=np.float32)
 
-        self.last_obs = obs #Save latest obs for backup
-        return obs
 
     #The actual policy decision, return true if ai decides to jump this frame
     def decide(self, player, pipes, screen_height: int) -> bool:
 
+        if self.cooldown > 0:
+            self.cooldown -= 1
         obs = self.make_obs(player, pipes, screen_height) #Build from game state
         x= torch.from_numpy(obs).unsqueeze(0).to(self.device) #Convert to a device tensor with my batch dimensions
-        with torch.no_grad(): #Stop tracking for faster infer
+        with torch.inference_mode(): #Stop tracking for faster infer
             logits, _ = self.model(x)
             action = int(torch.argmax(logits, dim=1).item()) #Pick action with highest logit, 0= no 1= jump
+            if action == 1 and self.cooldown == 0:
+                self.cooldown = 6
+            elif action == 1:
+                action=0
 
         #0 = no jump, 1 jump
-        return action == 1
+        return bool(action)
 
