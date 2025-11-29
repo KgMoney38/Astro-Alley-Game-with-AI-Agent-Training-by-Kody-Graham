@@ -23,7 +23,7 @@ from barriers import SCREEN_HEIGHT, PIPE_GAP, PIPE_WIDTH, PIPE_SPEED, PIPE_MIN_T
 
 #Aligned with player_icon.py
 PLAYER_W=99
-PLAYER_H=33
+PLAYER_H=69
 PLAYER_HALF_H = PLAYER_H * .5
 
 #Simple pipe representation for training env
@@ -52,13 +52,14 @@ class GameEnv:
 
 
             #Rewards
-            pass_reward: float= 15.0,
-            crash_penalty: float = -10.0,
-            step_reward: float = .010,
-            jump_penalty: float = .0015,
-            shaping_scale: float = .010,
+            pass_reward: float= 100.0,
+            crash_penalty: float = -100.0,
+            step_reward: float = .02,
+            jump_penalty: float = .001,
+            shaping_scale: float = 0.0,
             shaping_max_dx: float = 260.0,
-            min_jump_interval: int = 6,
+            min_jump_interval: int = 3,
+            center_bonus_scale: float = 2.0,
     ):
         self.obs_dim = 7
         self.width = int(width)
@@ -80,7 +81,10 @@ class GameEnv:
         self.shaping_scale = float(shaping_scale)
         self.shaping_max_dx = float(shaping_max_dx)
         self.min_jump_interval = int(min_jump_interval)
+        self.center_bonus_scale = float(center_bonus_scale)
+
         self.jump_cd = 0 #Jump cooldown
+        self.in_pipe_zone = False
 
         #My agent state
         self.px = int(self.width *.10) #Fixed pilot x like in the real game
@@ -97,11 +101,13 @@ class GameEnv:
             self.rng = random.Random(int(seed))
 
         if self.domain_randomize:
-            self.gravity = float(self.rng.uniform(.45,.55))
-            self.jump_impulse = float(self.rng.uniform(-10.5,-9.5))
+            #self.gravity = float(self.rng.uniform(.45,.55))
+            #self.jump_impulse = float(self.rng.uniform(-10.5,-9.5))
+            self.gravity = .50
+            self.jump_impulse = -10.0
         else:
-            self.gravity = float(self.rng.uniform(.45, .55))
-            self.jump_impulse = float(self.rng.uniform(-10.5, -9.5))
+            self.gravity= .50
+            self.jump_impulse = -10.0
 
         self.gap = int(PIPE_GAP)
         self.pipe_dx = int(360)
@@ -111,6 +117,7 @@ class GameEnv:
         self.steps = 0 #Step counter
         self.pipes.clear()
         self.jump_cd = 0
+        self.in_pipe_zone = False
 
         cy, gh = self.rand_gap()
         first_x = float(self.width) #Set random gap for first pipe
@@ -123,7 +130,7 @@ class GameEnv:
 
     #Determine if autopilot should increase - vertical velocity or wait
     def step(self, action: int):
-        # Action 0=no jump, 1=jump
+        #Action 0=no jump, 1=jump
         self.steps += 1
         reward = 0.0
 
@@ -180,9 +187,10 @@ class GameEnv:
         #Pipe
         collided = False
         passed= False
+        pass_centered = None
 
         if not terminated:
-            collided,passed = self.collision_and_pass()
+            collided,passed, pass_centered = self.collision_and_pass()
             if collided and self.terminate_on_impact:
                 terminated = True
                 reward += self.crash_penalty
@@ -190,37 +198,49 @@ class GameEnv:
         if passed:
             reward += self.pass_reward
 
-        #Dense shape
-        #Encourage being centered in gap when pipe close
-        next_p= self.next_pipe()
-        if next_p is not None:
-            cx = next_p.x +.5 * next_p.width
-            dx = cx- self.px
+            #Center bonus
+            if pass_centered is not None:
+                center_score = max(0.0, 1.0- pass_centered)
+                reward += 40.0 * center_score
 
-            if 0.0 <= dx <= self.shaping_max_dx:
-                cy = next_p.gap_y
-                half_gap = .5 * max(1.0,float(next_p.gap_h))
-                dy_norm = abs(self.py - cy)/ half_gap
-                closeness = 1.0 - min(1.0, dy_norm)
-                closeness_sq= closeness * closeness
-                w= math.exp(-dx/self.shaping_max_dx)
-                reward += self.shaping_scale * w * closeness_sq
-                edge_thresh = .6
-                centered = abs((self.py - cy) / half_gap)
+        #Only if not crashed
+        if not terminated:
+            #Setup for my center score
+            next_p = self.next_pipe()
+            if next_p is not None:
+                cx = next_p.x + .5 * next_p.width
+                dx = cx - self.px
 
-                if centered < .25:
-                    reward -= .006 * (abs(self.vy)/ 8.0) * (1.0 - centered) * w
+                #in_zone = 0.0 <= dx <= self.shaping_max_dx
 
-                if dy_norm> edge_thresh:
-                    penalty = (dy_norm-edge_thresh)**2
-                    reward -= .04 * w * penalty
+                ahead_dist = self.shaping_max_dx
+                behind_dist = 0.5 * next_p.width
+                in_zone = (-behind_dist <= dx <= ahead_dist)
 
-                if next_p is not None and 0.0 <= dx <=self.shaping_max_dx:
-                    cy = next_p.gap_y
-                    half_gap = .5 * max(1.0,float(next_p.gap_h))
-                    align_raw = (cy- self.py) *(-self.vy)
-                    align_norm = max(-1.0, min(1.0, align_raw/ (10*half_gap)))
-                    reward += .018 * w * align_norm
+                if in_zone:
+                    half_gap = .5 * max(1.0, float(next_p.gap_h))
+                    centered = abs((self.py - next_p.gap_y) / half_gap)
+                    center_score = max(0.0, 1.0 - centered)
+
+                    #Penalize high velocity when centered
+                    vel_norm = abs(self.vy)/10.0
+                    jitter_penalty = (vel_norm ** 2) * center_score
+                    reward -= .5 * jitter_penalty
+                    shape = center_score * (1.0-.7 * (vel_norm **2))
+                    reward+= self.center_bonus_scale * shape
+
+
+                    center_zone = abs(dx) <= .25 * next_p.width
+                    if center_zone:
+                        flat_score = max(0.0, 1.0 - vel_norm)
+                        reward += center_score * flat_score
+
+                self.in_pipe_zone = in_zone
+
+            else:
+                self.in_pipe_zone = False
+        else:
+            self.in_pipe_zone = False
 
         #Small survival reward and small penalty to discourage spam jumping
         reward += self.step_reward
@@ -271,9 +291,10 @@ class GameEnv:
         return best
 
     #Pipes will just be considered as 2 rectangles and the gap will obviously be in the middle
-    def collision_and_pass(self) -> tuple[bool,bool]:
+    def collision_and_pass(self) -> tuple[bool,bool, float | None]:
         collided = False
         passed = False
+        pass_centered = None
 
         player_w, player_h= PLAYER_W, PLAYER_H #Same as my actually player icon for consistent training and real game parameters
                                     #For tighter fit i increased size player size here for training but left it the same in player_icon
@@ -285,8 +306,8 @@ class GameEnv:
             gap_top = pipe.gap_y - pipe.gap_h*.5
             gap_bottom = pipe.gap_y + pipe.gap_h*.5
 
-            top_rect= (pipe.x,0.0,pipe.width, gap_top)
-            bottom_rect= (pipe.x, gap_bottom, pipe.width, self.height - gap_bottom)
+            top_rect= (pipe.x,0.0, pipe.width, gap_top+10)
+            bottom_rect= (pipe.x, gap_bottom, pipe.width, self.height - (gap_bottom-10))
 
             #AABB vs top and bottom
             if self.axis_aligned_bound_box(px1,py1, player_w, player_h,*top_rect) or \
@@ -297,8 +318,10 @@ class GameEnv:
             pipe_right = pipe.x + pipe.width
             if pipe_right < self.px <= pipe_right + self.pipe_speed:
                 passed = True
+                half_gap = max(1.0, pipe.gap_h * .5)
+                pass_centered = abs((self.py- pipe.gap_y) / half_gap)
         
-        return collided, passed
+        return collided, passed, pass_centered
 
     #Test between rectangles A and B
     @staticmethod
@@ -312,7 +335,7 @@ class GameEnv:
         p2 = future[1] if len(future) > 1 else None
         return p1, p2
 
-    # Observation builder same five dimension as training, HAS TO MATCH TRAINING!
+    #Observation builder same five dimension as training, HAS TO MATCH MY TRAINING! Missed this at first
     def make_obs(self):
         px = float(self.px)
         py = float(self.py)

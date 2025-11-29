@@ -91,7 +91,7 @@ def batchify_torch(bs: int, *tensors: torch.Tensor):
         yield tuple(t.index_select(0, j) for t in tensors)
 
 #Evaluate current policy greedily
-def evaluate_policy(model: ActorCritic, device, episodes: int=40):
+def evaluate_policy(model: ActorCritic, device, episodes: int=50):
 
     env = GameEnv(domain_randomize=False)
     model.eval()
@@ -140,7 +140,7 @@ def format_elapsed(seconds: float)-> str:
 def train():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") #Gpu if available
-    env= GameEnv() #Instantiate the environment
+    env= GameEnv(domain_randomize=False) #Instantiate the environment
 
     observation_dim, action_dim = env.obs_dim, 2
 
@@ -195,8 +195,198 @@ def train():
 
     style_axis()
 
-    #Set spacing once
-    plt.subplots_adjust(left=0.07, right=0.98, bottom=0.08, top=0.9, hspace=0.35, wspace=0.25)
+    #My Console Mirror Section
+    from collections import deque
+    from matplotlib import transforms as _mtransforms
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Rectangle
+
+    #Layout
+    LEFT_F = 0.07  #Left Margin
+    RIGHT_F = 0.98  #Right Margin
+    TOP_F = 0.90  #Top
+    GAP_ABOVE_CONSOLE_F = 0.08  #Between charts
+
+    CONSOLE_H_F = 0.26  #Console Height
+    BOTTOM_F = 0.06  #Bot gap
+
+    #Text
+    CONSOLE_FONT = 9
+    LINE_PX = int(CONSOLE_FONT * 1.60)
+    PAD_TOP_PX = 10
+    PAD_BOT_PX = 10
+    PAD_LEFT_PX = 10
+    RULE_GAP_PX = 10
+
+    #Instructions
+    INSTR_LINES = [
+        "***** Stop the program at anytime and the best policy so far will be saved and training will end. ******",
+        "***** Press 'Q' to stop training and save best model. Note: Focus must be in the graph window*****",
+        "***** Each update = 50 Episodes. Note: Press ESC to exit fullscreen.***** ",
+    ]
+    INSTR_HEIGHT_PX = len(INSTR_LINES) * LINE_PX
+
+    #Vertical space for the console and gap for the charts above it.
+    plt.subplots_adjust(
+        left=LEFT_F, right=RIGHT_F, top=TOP_F,
+        bottom=BOTTOM_F + CONSOLE_H_F + GAP_ABOVE_CONSOLE_F,
+        hspace=0.35, wspace=0.25
+    )
+
+    #Create console
+    console_ax = fig.add_axes([0, 0, 1, 1])
+    console_ax.set_facecolor("black")
+    console_ax.set_xticks([]);
+    console_ax.set_yticks([])
+    for s in console_ax.spines.values():
+        s.set_color("red");
+        s.set_linewidth(1.5)
+
+    #Text obs
+    _instr_text = None
+    _log_text = None
+    _rule_line = None
+    _clip_rect = None
+
+    #Mirror console
+    _buf = deque()
+
+    #All functions are intentionally clearly named so comments arent required
+
+    def _fig_px():
+        w_in, h_in = fig.get_size_inches()
+        return int(round(w_in * fig.dpi)), int(round(h_in * fig.dpi))
+
+    def _console_bounds_fig():
+        fig_w_px, fig_h_px = _fig_px()
+        width_px = max(120, fig_w_px - 30)
+        left_px = (fig_w_px - width_px) / 2.0
+        #Convert the px to fractions
+        left_f = left_px / fig_w_px
+        width_f = width_px / fig_w_px
+        return [left_f, BOTTOM_F, width_f, CONSOLE_H_F]
+
+    def _visible_log_lines():
+        bbox = console_ax.get_window_extent()
+        h_px = max(1, int(bbox.height))
+        avail_px = _rule_y_px() - PAD_BOT_PX
+        avail_px = max(0, int(avail_px))
+        return max(1, avail_px // max(1, LINE_PX))
+
+    def _rule_y_px():
+        bbox = console_ax.get_window_extent()
+        h_px = max(1, int(bbox.height))
+        y_rule_from_top_px = PAD_TOP_PX + INSTR_HEIGHT_PX + RULE_GAP_PX
+        return max(0, h_px - y_rule_from_top_px)
+
+    def _rule_y_axes():
+        bbox = console_ax.get_window_extent()
+        return max(0.0, min(1.0, _rule_y_px() / max(1, int(bbox.height))))
+
+    def _trim_to_visible():
+        max_lines = _visible_log_lines()
+        while len(_buf) > max_lines:
+            _buf.popleft()
+
+    def _render_console(force=False):
+        nonlocal _instr_text, _log_text, _rule_line, _clip_rect
+
+        instr_str = "\n".join(INSTR_LINES)
+        tr_instr = console_ax.transAxes + _mtransforms.ScaledTranslation(
+            PAD_LEFT_PX / fig.dpi, -PAD_TOP_PX / fig.dpi, fig.dpi_scale_trans
+        )
+        tr_log = console_ax.transAxes + _mtransforms.ScaledTranslation(
+            PAD_LEFT_PX / fig.dpi, PAD_BOT_PX / fig.dpi, fig.dpi_scale_trans
+        )
+
+        if _instr_text is None:
+            _instr_text = console_ax.text(
+                0.0, 1.0, instr_str, ha="left", va="top",
+                color="white", family="monospace", fontsize=CONSOLE_FONT,
+                transform=tr_instr
+            )
+        else:
+            _instr_text.set_transform(tr_instr)
+            _instr_text.set_text(instr_str)
+
+        y_rule = _rule_y_axes()
+        if _rule_line is None:
+            _rule_line = Line2D([0, 1], [y_rule, y_rule], color="red", linewidth=2, transform=console_ax.transAxes)
+            console_ax.add_line(_rule_line)
+        else:
+            _rule_line.set_ydata([y_rule, y_rule])
+
+        if _clip_rect is None:
+            _clip_rect = Rectangle(
+                (0, 0), 1, y_rule, transform=console_ax.transAxes,
+                facecolor="none", edgecolor="none"
+            )
+            console_ax.add_patch(_clip_rect)
+        else:
+            _clip_rect.set_height(y_rule)
+
+        _trim_to_visible()
+        tail = list(_buf)
+        log_str = "\n".join(tail)
+
+        if _log_text is None:
+            _log_text = console_ax.text(
+                0.0, 0.0, log_str, ha="left", va="bottom",
+                color="white", family="monospace", fontsize=CONSOLE_FONT,
+                transform=tr_log, clip_on=True
+            )
+            _log_text.set_clip_path(_clip_rect)
+        else:
+            _log_text.set_transform(tr_log)
+            _log_text.set_text(log_str)
+            _log_text.set_clip_path(_clip_rect)
+
+        fig.canvas.draw_idle()
+
+    def _reflow(_evt=None):
+        console_ax.set_position(_console_bounds_fig())
+        _render_console(force=True)
+
+    #Initial position & draw
+    _reflow()
+    fig.canvas.mpl_connect("resize_event", _reflow)
+
+    #Auto scroll
+    if not getattr(sys.stdout, "_is_console_mirror", False):
+        _orig_stdout = sys.stdout
+
+        class _MirrorStdout:
+            _is_console_mirror = True
+
+            def __init__(self, wrapped, skip_first_lines: int = 3):
+                self._wrapped = wrapped
+                self._acc = ""
+                self._skip = skip_first_lines
+
+            def __getattr__(self, name):
+                return getattr(self._wrapped, name)
+
+            def write(self, s):
+                self._wrapped.write(s)
+                self._acc += s
+                while "\n" in self._acc:
+                    line, self._acc = self._acc.split("\n", 1)
+                    if self._skip > 0:
+                        self._skip -= 1
+                    else:
+                        _buf.append(line)
+                _trim_to_visible()
+                _render_console()
+
+            def flush(self):
+                try:
+                    self._wrapped.flush()
+                except Exception:
+                    pass
+
+        sys.stdout = _MirrorStdout(_orig_stdout)
+
+    #Finally end of my console and graph window block
 
     try:
         fig.canvas.manager.set_window_title("Astro Alley - PPO Training Dashboard")
@@ -283,7 +473,10 @@ def train():
             return
 
         elapsed_str = format_elapsed(elapsed_sec)
-        fig.suptitle(f"Astro Alley - Update #{current_update} | Elapsed {elapsed_str}  (Press 'Q' to stop training)", color="white")
+        fig.suptitle(
+            f"Astro Alley - Update #{current_update} | Elapsed {elapsed_str}  (Press 'Q' to stop training)",
+            color="white"
+        )
 
         #Top row
         set_slope_colored_segments(lc_tlen, sc_tlen, time_hist, train_len_hist)
@@ -291,9 +484,9 @@ def train():
 
         #Bottom row
         set_slope_colored_segments(lc_eval_len, sc_eval_len, updates_hist, eval_len_hist)
-        set_slope_colored_segments(lc_eval_pipes,sc_eval_pipes,updates_hist, eval_pipes_hist)
+        set_slope_colored_segments(lc_eval_pipes, sc_eval_pipes, updates_hist, eval_pipes_hist)
 
-        #Rescale with new data
+        #Rescale with our new data
         for ax in (ax_tlen, ax_tret, ax_eval_len, ax_eval_pipes):
             ax.relim()
             ax.autoscale_view()
@@ -301,9 +494,39 @@ def train():
         fig.canvas.draw()
         ui_poll()
 
+    is_fullscreen = False
+
+    def _toggle_fullscreen():
+        nonlocal is_fullscreen
+        try:
+            manager = plt.get_current_fig_manager()
+        except Exception:
+            return
+
+        window = getattr(manager, "window", None)
+        if window is not None and hasattr(window, "showFullScreen") and hasattr(window, "showNormal"):
+            if is_fullscreen:
+                window.showNormal()
+                is_fullscreen = False
+            else:
+                window.showFullScreen()
+                is_fullscreen = True
+        elif hasattr(manager, "full_screen_toggle"):
+            manager.full_screen_toggle()
+            is_fullscreen = not is_fullscreen
+
+    def _on_key(event):
+        #ESC exits fullscreen back to windowed, but doesnt stop my training
+        if event.key == "escape" and is_fullscreen:
+            _toggle_fullscreen()
+
+    fig.canvas.mpl_connect("key_press_event", _on_key)
+
     #Bring my graph window to the front on open
     plt.show(block=False)
     ui_poll()
+    #Immediately go fullscreen
+    _toggle_fullscreen()
 
     #Dont steal focus after first time
     try:
@@ -311,6 +534,7 @@ def train():
         mpl.rcParams["figure.raise_window"] = False
     except Exception:
         pass
+
 
     #Defaults for my PPO setup
     total_updates=100000
@@ -324,7 +548,7 @@ def train():
     clip_eps = 0.15
     vf_coef = 0.5
     entropy_coef_start = 0.012
-    entropy_coef_end = .001
+    entropy_coef_end = .003
     target_kl= .02 #kl= divergence for early stop, also throughout class
     max_grad_norm = 0.7
 
@@ -335,7 +559,7 @@ def train():
     best_state_dict = None #Keep track best model
 
     print("****** Stop the program at anytime and the best policy so far will be saved and training will end. ******")
-    print("****** Note: Each update = 100 Episodes. ******")
+    print("****** Note: Each update = 50 Episodes. ******")
     print("****** Press 'Q' to stop training and save best model. Note: Focus must be in the graph window******")
 
     #History for graph
@@ -349,14 +573,14 @@ def train():
     last_eval_len = 0.0
     last_eval_pipes = 0.0
 
-    EVAL_INTERVAL = 20
-    EVAL_EPISODES = 40
-    MAX_POINTS = 300
+    EVAL_INTERVAL = 10
+    EVAL_EPISODES = 50
+    MAX_POINTS = 1000
 
     start_time = time.time()
 
     try:
-        # PPO outer loop over updates
+        #PPO outer loop over updates
         for update in range(1,total_updates+1):
             #If graphs window closed end program
             if not plt.fignum_exists(fig.number):
@@ -440,7 +664,10 @@ def train():
                     last_val=0.0
 
             #Convert buffers to tensor on device
-            obs_t = torch.as_tensor(obs_buf, dtype=torch.float32, device=device)
+            obs_np = np.asarray(obs_buf, dtype=np.float32)
+            obs_np = np.ascontiguousarray(obs_np, dtype=np.float32)
+            obs_t = torch.from_numpy(obs_np).to(device)
+
             act_t =torch.as_tensor(act_buf, dtype=torch.int64, device=device)
             old_logp_t= torch.as_tensor(logp_buf, dtype=torch.float32, device=device)
             reward_t= torch.as_tensor(reward_buf, dtype=torch.float32, device=device)

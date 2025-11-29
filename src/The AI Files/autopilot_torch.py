@@ -57,6 +57,7 @@ class TorchPolicy:
         self.model = ActorCritic(obs_dim=7, hidden=256, act_dim=2).to(self.device)
         loaded= False
         self.cooldown = 0
+        self.min_jump_interval = 3
 
         #Check weights loaded right
         if ckpt_path and os.path.isfile(ckpt_path):
@@ -107,6 +108,36 @@ class TorchPolicy:
         p2 = future[1] if len(future) > 1 else None
         return p1, p2
 
+    def _too_low_in_gap(self, player, pipes, margin_px: float = 10.0) -> bool:
+        """
+        Return True if the player is horizontally inside the current pipe
+        and the bottom of the ship is within 'margin_px' of the top of the
+        lower pipe. This is the case where you usually die by scraping the
+        top of the bottom pipe.
+        """
+        p = self.next_pipe(player, pipes)
+        if p is None:
+            return False
+
+        prect = self.player_rect(player)
+
+        pipe_left = float(p.x)
+        pipe_right = float(p.x + p.width)
+
+        #Only care when we're actually over or inside pipe horizontally
+        if not (pipe_left <= float(prect.centerx) <= pipe_right):
+            return False
+
+        gap_top = float(p.top_height)
+        gap_bottom = gap_top + float(p.gap)
+
+        ship_bottom = float(prect.bottom)
+
+        #If this gets too small, we want to jump
+        dist_to_lower_pipe = gap_bottom - ship_bottom
+
+        return dist_to_lower_pipe <= margin_px
+
     #Observation builder same five dimension as training, HAS TO MATCH TRAINING!
     def make_obs(self, player, pipes, screen_height: int, pipe_speed = 4.0) -> np.ndarray:
         px= player.get_rect().centerx
@@ -156,8 +187,13 @@ class TorchPolicy:
         with torch.inference_mode(): #Stop tracking for faster infer
             logits, _ = self.model(x)
             action = int(torch.argmax(logits, dim=1).item()) #Pick action with highest logit, 0= no 1= jump
+        if self._too_low_in_gap(player, pipes, margin_px=10.0):
+            action = 1
+            self.cooldown = self.min_jump_interval  #reset cooldown from this safety jump
+
+        else:
             if action == 1 and self.cooldown == 0:
-                self.cooldown = 6
+                self.cooldown = self.min_jump_interval
             elif action == 1:
                 action=0
 
