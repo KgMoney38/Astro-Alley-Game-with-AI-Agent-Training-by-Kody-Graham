@@ -1,7 +1,24 @@
 # Astro Alley – Flappy Bird–Style RL Game
 
-Astro Alley is a Flappy Bird–inspired arcade game where a rocket weaves through moving pipes.
-Under the hood, it includes a PyTorch PPO (Proximal Policy Optimization) agent that can learn to fly the ship on its own.
+--
+REQUIREMENT: Python 3.13 (I have found 3.14 can fail to load pygame)
+--
+
+--
+REQUIREMNET: PLEASE MAKE SURE TO RUN THIS IN POWER SHELL TO MAKE SURE YOU HAVE ALL DEPENDENCIES: pip install pygame torch numpy matplotlib moviepy 
+--
+
+
+Astro Alley is a Flappy Bird–inspired arcade game where the goal is to pilot a rocket through moving obstacles.
+Two modes:
+- User Mode (classic you play it style)
+- Autopilot Mode (This uses my RL trained agent to play)
+
+--
+Note: You DO NOT have to retrain the agent before running the app from main.py. I let the training algorithm run for 37 hours and saved it to the repository. 
+--
+
+- You absolutely can run another training session and can quit anytime to save the best policy thus far. I just had time so I let it run. You can see that entire training session, sped up obviously, plus the entire project from code, to training, to the actual gameplay here: https://youtu.be/h-_DB1jLB14?si=vY6G8P_zvvaHYS9_
 
 Developer: Kody Graham
 
@@ -11,9 +28,9 @@ All images, video clips, and music are either original or from copyright-free so
 
 - Arcade-style gameplay with tight hitboxes and smooth movement
 
-- Human mode – play the game yourself
+- User mode – play the game yourself
 
-- AI autopilot mode – watch a trained PPO agent fly through the course
+- AI autopilot mode – watch a trained agent navigate through the course
 
 - Custom training environment (GameEnv) separate from the game visuals
 
@@ -23,21 +40,18 @@ All images, video clips, and music are either original or from copyright-free so
 
 You’ll need:
 
-- Python 3.10+
+- Python 3.10-3.13 NOT 3.14 (pygame not supported)
 
 - PyGame
 
 - PyTorch
- (CPU build is fine)
 
 - NumPy
 
 - Matplotlib
 
-Install (example):
-
-pip install pygame torch numpy matplotlib
-
+- See top for install instructions
+  
 # Project Structure
 
 Project Layout:
@@ -47,13 +61,13 @@ Astro-Alley/
 
 - main.py              # Entry point – launches menu and game
 
-- game.py              # Main game loop & high-level game logic
+- game.py              #Main game loop & high-level game logic
 
 - barriers.py          # Pipe/obstacle definitions and constants
 
 - player_icon.py       # Player sprite + movement/physics
 
-- menu.py              # Main menu / customize menu UI
+- menu.py              #Main menu / customize menu UI
 
 - autopilot_torch.py   # Runtime Torch policy (Actor–Critic) used by the game
 
@@ -63,13 +77,13 @@ Astro-Alley/
 
 - assets/              # Images, fonts, sounds (if applicable)
 
-- autopilot_policy.pt  # Saved trained weights (created by training script)
+- autopilot_policy.pt  #Saved trained weights (created by training script)
 
 # How to Play the Game
 
-Make sure your dependencies are installed.
+Make sure the dependencies are installed.
 
-From the project folder, run:
+From the project folder, just run:
 
 python main.py
 
@@ -78,7 +92,7 @@ Use the in-game menu to:
 
 - Start a normal game (you control the ship).
 
-- Enable AI / Autopilot mode (the trained agent controls the ship).
+- Enable AI/ Autopilot mode (the trained agent controls the ship).
 
 - Controls and options are shown in the game’s main menu and HUD.
 
@@ -88,12 +102,12 @@ If you want to (re)train the agent yourself:
 
 Verify PyTorch, NumPy, and Matplotlib are installed.
 
-From the project folder, run:
+Then from the project folder, run:
 
 python pilot_training.py
 
 
-You’ll see a training dashboard window with:
+You’ll see a multi grapj training dashboard window with:
 
 - Training episode length
 
@@ -114,7 +128,7 @@ Note: Closing the training window or pressing Q (as indicated in the console hea
 
 # Notes
 
-This project is primarily intended as a portfolio piece to demonstrate:
+This project is primarily intended as a resume project to demonstrate:
 
 - Python application development
 
@@ -123,8 +137,6 @@ This project is primarily intended as a portfolio piece to demonstrate:
 - Familiarity working with GitHub
 
 - Implementing and training a PPO agent in PyTorch
-
-- Feel free to explore the code, tweak hyperparameters, or change rewards to see how the agent’s behavior changes.
 
 # Credits
 
