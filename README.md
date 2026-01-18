@@ -1,10 +1,10 @@
 # Astro Alley – Flappy Bird–Style RL Game
 
---
+
 REQUIREMENT: Python 3.13 (I have found 3.14 can fail to load pygame)
 --
 
---
+
 REQUIREMNET: PLEASE MAKE SURE TO RUN THIS IN POWER SHELL TO MAKE SURE YOU HAVE ALL DEPENDENCIES: pip install pygame torch numpy matplotlib moviepy 
 --
 
