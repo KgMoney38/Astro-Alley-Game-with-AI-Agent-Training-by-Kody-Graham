@@ -14,7 +14,6 @@ Two modes:
 - User Mode (classic you play it style)
 - Autopilot Mode (This uses my RL trained agent to play)
 
---
 Note: You DO NOT have to retrain the agent before running the app from main.py. I let the training algorithm run for 37 hours and saved it to the repository. 
 --
 
